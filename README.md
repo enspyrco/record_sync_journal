@@ -11,7 +11,8 @@ record type so codraw and engram share one implementation.
 ## The model
 
 - **A record** has an *identity* (`{family, …fields}`), from which the app's
-  `IdentityFamily` derives its id and type. The id never travels.
+  `IdentityFamily` derives a key and type. The record's id is that family plus
+  its key, so two families never share an id, and the id never travels.
 - **A unit** is a group of a record's fields, always written whole. Every record
   also has `_tomb`, holding `_deleted`.
 - **A unit write** is one canonical JSON object, as bytes. Its id is the
@@ -36,7 +37,7 @@ record type so codraw and engram share one implementation.
 | `RecordJournal` | `write`, `absorb`, `read`, `readAll`, `recompute`, `unsent`, `markAcked`. |
 | `JournalStore` | The storage seam. `InMemoryJournalStore` ships here; apps write their own over sembast, drift, … |
 | `Serializer` | The lock seam. Defaults to `isolateLocalQueue()`; pass a lock that spans tabs or isolates when the store is shared. |
-| `HashedIdentityFamily` | The common family: id = UUIDv8 of SHA-256 over the identity's canonical text. |
+| `HashedIdentityFamily` | The common family: key = UUIDv8 of SHA-256 over the identity's canonical text. |
 
 ## Writing
 

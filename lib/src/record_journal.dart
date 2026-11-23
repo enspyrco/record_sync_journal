@@ -17,8 +17,10 @@ import 'view.dart';
 final class RecordJournal {
   /// A journal over [store], reading identities through [families].
   ///
-  /// [serialize] orders this journal's operations; pass a lock that also spans
-  /// other isolates or tabs when the store is shared with them. [random] draws
+  /// [serialize] orders this journal's writes (write, absorb, recompute,
+  /// markAcked); pass a lock that also spans other isolates or tabs when the
+  /// store is shared with them. Reads take no lock: the store's transactions
+  /// isolate them. [random] draws
   /// salts.
   RecordJournal({
     required JournalStore store,

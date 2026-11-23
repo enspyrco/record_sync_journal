@@ -77,17 +77,25 @@ final class RecordId implements Comparable<RecordId> {
   const RecordId._(this.family, this.key);
 
   /// The id [family] gives the record it keys as [key], for looking a record
-  /// up. Throws an [ArgumentError] when either is empty.
-  factory RecordId.of({required String family, required String key}) {
-    if (family.isEmpty || key.isEmpty) {
-      throw ArgumentError.value(
-          '$family/$key', 'id', 'family and key are non-empty');
-    }
-    return RecordId._(family, key);
-  }
+  /// up. Throws an [ArgumentError] when [parse] would return null.
+  factory RecordId.of({required String family, required String key}) =>
+      parse(family: family, key: key) ??
+      (throw ArgumentError.value(
+          [family, key], 'id', 'family and key are non-empty, canonical text'));
 
-  /// Reads back an id a store saved as [storageKey]; null when it is not one.
+  /// The id, or null when [family] or [key] is empty or holds a lone
+  /// surrogate, which no store could key on.
+  static RecordId? parse({required String family, required String key}) =>
+      family.isEmpty ||
+              key.isEmpty ||
+              canonicalJsonOrNull([family, key]) == null
+          ? null
+          : RecordId._(family, key);
+
+  /// Reads back an id a store saved as [storageKey]; null when [text] is not
+  /// exactly one.
   static RecordId? parseStorageKey(String text) {
+    if (!nestsWithin(text.codeUnits, 1)) return null;
     final Object? parsed;
     try {
       parsed = jsonDecode(text);
@@ -96,10 +104,8 @@ final class RecordId implements Comparable<RecordId> {
     }
     return switch (parsed) {
       [String family, String key]
-          when family.isNotEmpty &&
-              key.isNotEmpty &&
-              canonicalJson([family, key]) == text =>
-        RecordId._(family, key),
+          when canonicalJsonOrNull([family, key]) == text =>
+        parse(family: family, key: key),
       _ => null,
     };
   }
@@ -127,8 +133,9 @@ final class RecordId implements Comparable<RecordId> {
   @override
   int get hashCode => Object.hash(family, key);
 
+  /// The [storageKey]: one text per id, so two ids never print alike.
   @override
-  String toString() => '$family/$key';
+  String toString() => storageKey;
 }
 
 /// The name of a merge unit: a group of fields always written whole.
@@ -291,13 +298,17 @@ final class FieldName implements Comparable<FieldName> {
 final class RecordSchema {
   RecordSchema._(this.type, this.units, this.writeOnce);
 
-  /// A record type. Throws an [ArgumentError] when [writeOnce] names a unit
-  /// [units] does not declare.
+  /// A record type. Throws an [ArgumentError] when [units] declares the
+  /// reserved [UnitName.tomb], which every record has and the door reads by
+  /// its own rule, or when [writeOnce] names a unit [units] does not declare.
   factory RecordSchema({
     required String type,
     required Map<UnitName, Set<FieldName>> units,
     Set<UnitName> writeOnce = const {},
   }) {
+    if (units.keys.any((u) => u.isTomb)) {
+      throw ArgumentError.value(type, 'units', '_tomb is reserved');
+    }
     for (final n in writeOnce) {
       if (!units.containsKey(n)) {
         throw ArgumentError.value(n, 'writeOnce', 'not a unit of $type');

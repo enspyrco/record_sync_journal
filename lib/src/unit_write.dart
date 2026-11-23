@@ -271,6 +271,9 @@ final class Door {
   static Map<String, IdentityFamily> _byName(Iterable<IdentityFamily> fs) {
     final byName = <String, IdentityFamily>{};
     for (final f in fs) {
+      if (f.name.isEmpty) {
+        throw ArgumentError.value(f.name, 'families', 'a family has a name');
+      }
       if (byName.containsKey(f.name)) {
         throw ArgumentError.value(f.name, 'families', 'named twice');
       }
@@ -296,11 +299,9 @@ final class Door {
   ResolvedIdentity? resolve(Identity identity) {
     final family = _families[identity.family];
     final read = family?.resolve(identity);
-    if (family == null || read == null || read.key.isEmpty) return null;
-    return (
-      id: RecordId.of(family: family.name, key: read.key),
-      schema: read.schema,
-    );
+    if (family == null || read == null) return null;
+    final id = RecordId.parse(family: family.name, key: read.key);
+    return id == null ? null : (id: id, schema: read.schema);
   }
 
   /// Admits [frame] or says why not. In order: hash before any decode; strict
@@ -315,7 +316,7 @@ final class Door {
     Refused refuse(Refusal r) => Refused(id, r);
 
     if (bytes.isEmpty || bytes[0] != 0x7B) return refuse(Refusal.notAnObject);
-    if (!_nestsWithin(bytes, maxNestingDepth)) return refuse(Refusal.tooDeep);
+    if (!nestsWithin(bytes, maxNestingDepth)) return refuse(Refusal.tooDeep);
     final String text;
     try {
       text = const Utf8Decoder(allowMalformed: false).convert(bytes);
@@ -434,36 +435,6 @@ final class Door {
       kills: kills,
       salt: salt,
     ));
-  }
-
-  /// Whether no bracket in [bytes] opens deeper than [limit], counting only
-  /// brackets outside strings. Runs before any decoder sees the frame, so a
-  /// deep frame is refused in one pass and never recursed into.
-  static bool _nestsWithin(Uint8List bytes, int limit) {
-    var depth = 0;
-    var inString = false;
-    var escaped = false;
-    for (final b in bytes) {
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-        } else if (b == 0x5C) {
-          escaped = true;
-        } else if (b == 0x22) {
-          inString = false;
-        }
-        continue;
-      }
-      switch (b) {
-        case 0x22:
-          inString = true;
-        case 0x7B || 0x5B:
-          if (++depth > limit) return false;
-        case 0x7D || 0x5D:
-          depth--;
-      }
-    }
-    return true;
   }
 
   /// The ids in [wire], or null unless every entry is a write id and they are

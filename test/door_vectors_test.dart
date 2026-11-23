@@ -98,6 +98,10 @@ final Map<String, (String, Refusal?)> _textVectors = {
     _bodyWith('{"n":${'[' * 63}${']' * 63}}'),
     Refusal.tooDeep
   ),
+  'two siblings each nested to the bound': (
+    _bodyWith('{"n":[${'[' * 61}${']' * 61},${'[' * 61}${']' * 61}]}'),
+    null
+  ),
   'nested 20000 deep': (
     _bodyWith('{"n":${'[' * 20000}${']' * 20000}}'),
     Refusal.tooDeep
@@ -242,38 +246,40 @@ String _parsed(UnitWrite w) => [
 /// Every other platform must produce exactly these. Hashes, so that no tool
 /// can fold an escape in a golden into the character it names.
 const _expectedParsed = <String, String>{
-  r'0': '240ba5f4679d3860092099d6785377dfd2fa53658516109b168d395eb7871751',
+  r'0': '3cb93c7729cede86027c69cf634feca8fce9f23b40fa2e957f69decf787933f4',
   r'2^53 - 1':
-      '417ea348927c4b64bec36cf0ca9654c9d0769b1eae0622ae407b23852d98bc7a',
+      'aacba5ecb32f7088fbe9e809592959122a0ceec176e512e1b5c27b9d398bcce2',
   r'-(2^53 - 1)':
-      '082a91f5e5f7d3c42eb373331f96e970e570dcbbdcd3aaf23cd2e955df8baf7c',
+      'c3eaad83dfd30cf2ddab916fc61d420c642ab2af7d8fa50e592c3cca325a5f47',
   r'non-BMP raw':
-      '342eb468a5e3caef99ffc7854efb8f1fe1c0a4794a385d45df0711088f65ac2e',
+      '8bd3fe6096dee511d6e0df22965b51edd36bb8fe9491b708883b200063bb2934',
   r'U+2028 raw':
-      'e3e95cf88ebfc12ce7c625694aa0500c38ddb98f3d61a1e025eb97620f03831d',
+      '5f3609c1319c85b7f2ea1ac81566b88f2c10f967085baa69577c987e2792b7c9',
   r'\n \t \b \f \r \" \\':
-      '0f907b5814098f657bfd55fe431a36cc43d603361d08e8f3cecbabfcf1dd614a',
-  r'\u001f': '3678d7289c9eb1512c0294687117e663b48c4fec658de27a98d87841a04f6920',
+      '4b825bcceefad25e80529a99965a54d29f7add0b38f5f973093386d309a86b3e',
+  r'\u001f': '5372966166d51934e9d57a14f081a44bfab88bb39cc5de4bb9cd234c8f221997',
   r'raw DEL':
-      'e717a3add80b2ac7ee992855c27fa7fcebfdd4ead4f1bf184442c591a3199c20',
+      '13f650a91427d0a15463b5b1ad827da6c37a0b4f9214dfa8c743c6574f545db1',
   r'nested list and map':
-      '88f8e4bd9a17158dabfea873c44222d09952befe5962b21367be71d5a7fb99ca',
+      '5bb8cec85ce648da84e1ddb9ca5dcf5cc7345084c51aab60dcc4addcaf6bd754',
   r'nested to the bound':
-      '40d54cecebd4250ac9dc8cc3aa7efa951c42cb8ca40b3f092e8f13d65b4a0c78',
+      'c8827c49a85b59723fa33ac6ac06341eb0c5e654ce8877c074837c9805d57db4',
+  r'two siblings each nested to the bound':
+      '2a0809ab43e47acd30adab6bd6a6c8e85d38b45ea5602a37f60e232cf14ee0e4',
   r'brackets inside a string do not nest':
-      'f32e86958c1bc3716fd525e0e04f0aad093771f48f7a689fb26933a114b2df30',
+      '872b9c9beeed486bb86d81bb0b29392570d441e53e6c5d3e52345863430908e0',
   r'an escaped quote does not end the string':
-      'b3964e285f0a56bbdb5005d8eae7f3df361a3bfff44cef87c654df290c03815c',
+      '4d14f89eda980b3e5642ced01b8e22bef8ff6d61d68081f7bae8f7968e9c686c',
   r'sorted kills':
-      'ddc8638f92f90461dc40de9304b982ca1605566ebd5114ad93d6d85a92d526ad',
+      '16e0bb389d037442056f12496bb74f34a4695761ba8c940f342eff2ccf5b4551',
   r'delete with sorted saw':
-      'a9cdf8ca4c57803c59fc49bdb3df552e0929ebb1bcfc2f64b17faeeacd9589d8',
+      '655ff3c3a1d629a1a70c36f604aa2b5f28ae7da4e3c0b24d85a950946126d60c',
   r'delete with empty saw':
-      'ced22a4b8d0793099e440d116b8aeedaaaa8ac11693346e12041674f1c0036ab',
+      '5c89b4eebf415bff30a0a49886247e1efe8cf7663a48222b1baa531dcd18c969',
   r'restore':
-      'b184d1aaa8b9cfc12f4cb72cc2a208a7a5fd41f56a0063db391ae6f6902d8030',
+      'e1ef10fcc54b2f216f8c01e1146d636831c63f27e24f873e1d4b1a1337679b8d',
   r'deterministic birth':
-      '2a751c69b0c42c0c3c0a2e250fc22c6a39d351f69d240a6b68270adea987f471',
+      '2c9004ccb6ecade71293c492efedff6adce50c694720f3cd5fd425a5f7f1c5f1',
 };
 
 const _dump = false;

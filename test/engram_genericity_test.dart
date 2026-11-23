@@ -99,8 +99,55 @@ void main() {
   test('a record id round-trips through its storage key', () {
     final id = RecordId.of(family: 'a:b', key: '["x"]');
     expect(RecordId.parseStorageKey(id.storageKey), id);
-    expect(RecordId.parseStorageKey('[ "a","b"]'), isNull);
-    expect(RecordId.parseStorageKey('["a"]'), isNull);
+    expect('$id', id.storageKey);
+  });
+
+  test('only ids a store can key on exist', () {
+    final lone = String.fromCharCode(0xD800);
+    expect(RecordId.parse(family: 'f', key: lone), isNull);
+    expect(() => RecordId.of(family: 'f', key: lone), throwsArgumentError);
+    expect(RecordId.parse(family: '', key: 'k'), isNull);
+  });
+
+  test('a malformed storage key reads as null, never a throw', () {
+    final esc = String.fromCharCode(0x5C);
+    for (final text in [
+      '[ "a","b"]',
+      '["a"]',
+      '["","b"]',
+      '["a","${esc}ud800"]',
+      '["a",${'[' * 20000}${']' * 20000}]',
+      'not json',
+    ]) {
+      expect(RecordId.parseStorageKey(text), isNull, reason: text);
+    }
+  });
+
+  test('ids that print alike are the same id', () {
+    final a = RecordId.of(family: 'document/foo', key: 'bar');
+    final b = RecordId.of(family: 'document', key: 'foo/bar');
+    expect('$a', isNot('$b'));
+  });
+
+  test('a family whose key no store could hold is refused, not thrown',
+      () async {
+    final door = Door([_LoneSurrogateFamily()]);
+    final frame = Identity.of('lone', {'n': 'x'});
+    final bytes = UnitWriteDraft.restore(identity: frame, observedLiveTomb: {})
+        .encode(Salt.random(Random(1)));
+    expect(
+        door.admit(bytes),
+        isA<Refused>()
+            .having((r) => r.reason, 'reason', Refusal.invalidIdentity));
+  });
+
+  test('a family with no name cannot join a door', () {
+    expect(() => Door([_UnnamedFamily()]), throwsArgumentError);
+  });
+
+  test('a schema cannot declare _tomb', () {
+    expect(() => RecordSchema(type: 't', units: {UnitName.tomb: {}}),
+        throwsArgumentError);
   });
 
   test('a topicDocument is a composite id, and the composite is injective', () {
@@ -266,4 +313,23 @@ void main() {
             observedLive: {}),
         throwsArgumentError);
   });
+}
+
+final class _LoneSurrogateFamily implements IdentityFamily {
+  @override
+  String get name => 'lone';
+  @override
+  bool get allowsDeterministicBirth => false;
+  @override
+  FamilyRecord? resolve(Identity identity) =>
+      (key: String.fromCharCode(0xD800), schema: topicDocument);
+}
+
+final class _UnnamedFamily implements IdentityFamily {
+  @override
+  String get name => '';
+  @override
+  bool get allowsDeterministicBirth => false;
+  @override
+  FamilyRecord? resolve(Identity identity) => null;
 }
