@@ -1,0 +1,19 @@
+name: record_sync_journal
+description: >-
+  Records kept on the device as a journal of whole field-group writes. Each
+  write names the writes its author saw, and a field group's value is every
+  write nobody has replaced: no clock, and nothing picks a winner.
+version: 0.1.0-dev
+repository: https://github.com/enspyrco/record_sync_journal
+publish_to: none
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  checked_json: ^0.2.1
+  crypto: ^3.0.6
+
+dev_dependencies:
+  lints: ^6.1.0
+  test: ^1.33.0
