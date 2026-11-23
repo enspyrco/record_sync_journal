@@ -215,8 +215,11 @@ void main() {
     await alice.absorb((await bob.unsent()).single.bytes);
     final s = (await alice.read(_id(q)))!.units[_u('predicted')]!;
     expect(s.contested, isTrue);
-    // Engram's fold takes the first: the smallest canonical text.
-    expect(s.shown.first.json.integer('predictedDifficulty'), 420);
+    // The package never picks; engram's fold reads the integers and takes the
+    // max, so a harder prior shows the card sooner.
+    expect(
+        s.shown.map((f) => f.json.integer('predictedDifficulty')).reduce(max),
+        610);
   });
 
   test('shown orders by canonical text, which is not numeric order', () {
