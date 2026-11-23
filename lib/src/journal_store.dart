@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'serializer.dart';
 import 'values.dart';
 
 /// One appended write: its place in the log, its bytes, and whether this
@@ -14,7 +15,8 @@ final class JournalEntry {
 }
 
 /// Where a journal keeps its log and projection. Everything happens inside a
-/// [transaction]: it lands whole or not at all.
+/// [transaction]: it lands whole or not at all, and is isolated, so no
+/// transaction ever commits over changes another one committed meanwhile.
 ///
 /// The package ships [InMemoryJournalStore]; an app writes one over its own
 /// database.
@@ -60,19 +62,21 @@ abstract interface class JournalTransaction {
   Future<void> clearProjection();
 }
 
-/// A [JournalStore] in memory: a transaction works on a copy, which replaces
-/// the store's state only when the transaction completes.
+/// A [JournalStore] in memory. Transactions run one at a time, each on a copy
+/// that replaces the store's state only when it completes, so none can start
+/// from a state another is about to replace.
 final class InMemoryJournalStore implements JournalStore {
   _MemoryState _state = _MemoryState();
+  final Serializer _oneAtATime = isolateLocalQueue();
 
   @override
-  Future<T> transaction<T>(
-      Future<T> Function(JournalTransaction txn) body) async {
-    final staged = _state.copy();
-    final result = await body(_MemoryTransaction(staged));
-    _state = staged;
-    return result;
-  }
+  Future<T> transaction<T>(Future<T> Function(JournalTransaction txn) body) =>
+      _oneAtATime(() async {
+        final staged = _state.copy();
+        final result = await body(_MemoryTransaction(staged));
+        _state = staged;
+        return result;
+      });
 }
 
 final class _MemoryState {

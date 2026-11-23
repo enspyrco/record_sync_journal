@@ -3,11 +3,11 @@
 library;
 
 export 'src/canonical_json.dart'
-    show canonicalJson, canonicalJsonOrNull, maxSafeInteger;
+    show canonicalJson, canonicalJsonOrNull, maxNestingDepth, maxSafeInteger;
 export 'src/journal_store.dart'
     show InMemoryJournalStore, JournalEntry, JournalStore, JournalTransaction;
-export 'src/record_journal.dart'
-    show RecordJournal, Serializer, isolateLocalQueue;
+export 'src/record_journal.dart' show RecordJournal;
+export 'src/serializer.dart' show Serializer, isolateLocalQueue;
 export 'src/unit_write.dart'
     show
         Admission,
@@ -23,6 +23,8 @@ export 'src/unit_write.dart'
 export 'src/values.dart'
     show
         CanonicalObject,
+        FamilyRecord,
+        FieldName,
         HashedIdentityFamily,
         Identity,
         IdentityFamily,
@@ -31,6 +33,7 @@ export 'src/values.dart'
         ResolvedIdentity,
         Salt,
         UnitName,
-        WriteId;
+        WriteId,
+        uuidV8OfSha256;
 export 'src/view.dart'
     show DrawnRecord, GhostRecord, HiddenRecord, RecordView, UnitState;

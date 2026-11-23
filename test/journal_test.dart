@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -195,6 +196,22 @@ void main() {
     await expectLater(j.markAcked(4), throwsArgumentError);
   });
 
+  test('a read overlapping a write never loses the write', () async {
+    final j = _journal(InMemoryJournalStore());
+    UnitWriteDraft d(String n) => UnitWriteDraft.content(
+        identity: note(n), unit: body, fields: {'text': n}, observedLive: {});
+    for (var i = 0; i < 20; i++) {
+      await j.write([d('seed$i')]);
+    }
+    final writing = j.write([d('new')]);
+    final reading = j.readAll();
+    await Future.wait([writing, reading]);
+    final [w] = await writing;
+    expect(await j.readAll(), hasLength(21));
+    expect([for (final e in await j.unsent()) WriteId.ofBytes(e.bytes)],
+        contains(w));
+  });
+
   test('every mutation goes through the given serializer', () async {
     var calls = 0;
     final queue = isolateLocalQueue();
@@ -218,6 +235,20 @@ void main() {
     final q = isolateLocalQueue();
     await expectLater(q(() async => throw StateError('x')), throwsStateError);
     expect(await q(() async => 1), 1);
+  });
+
+  test('a failure nobody awaits still reaches the zone', () async {
+    final unhandled = <Object>[];
+    final done = Completer<void>();
+    // zone-ok: an unhandled async error is only observable through a zone.
+    runZonedGuarded(() {
+      final q = isolateLocalQueue();
+      unawaited(q<void>(() async => throw StateError('dropped')));
+      q(() async => done.complete());
+    }, (error, _) => unhandled.add(error));
+    await done.future;
+    await Future<void>.delayed(Duration.zero);
+    expect(unhandled, [isA<StateError>()]);
   });
 }
 

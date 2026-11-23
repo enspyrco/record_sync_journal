@@ -1,23 +1,10 @@
 import 'dart:math';
 
 import 'journal_store.dart';
+import 'serializer.dart';
 import 'unit_write.dart';
 import 'values.dart';
 import 'view.dart';
-
-/// Runs one operation at a time, each after the last completes.
-typedef Serializer = Future<T> Function<T>(Future<T> Function() op);
-
-/// A [Serializer] for one isolate. Its tail survives a failed operation, so
-/// one refusal cannot wedge every later one.
-Serializer isolateLocalQueue() {
-  Future<void> tail = Future<void>.value();
-  return <T>(Future<T> Function() op) {
-    final result = tail.then((_) => op());
-    tail = result.then((_) {}, onError: (Object _) {});
-    return result;
-  };
-}
 
 /// The device journal: where a local write is the log.
 ///
@@ -100,7 +87,7 @@ final class RecordJournal {
 
   /// Every record's view, ordered by id.
   Future<List<RecordView>> readAll() => _store.transaction((txn) async {
-        final ids = (await txn.projectedRecords())..sort();
+        final ids = [...await txn.projectedRecords()]..sort();
         return [
           for (final id in ids)
             RecordView.of((await txn.projected(id)).map(_readmit)),
@@ -123,8 +110,10 @@ final class RecordJournal {
           if (e.authoredHere) e,
       ]);
 
-  /// Marks every entry up to and including [seq] acknowledged. Never moves
-  /// backwards; throws an [ArgumentError] past the last entry.
+  /// Marks every entry up to and including [seq] acknowledged: a watermark,
+  /// so pass the highest seq below which the transport has delivered every
+  /// entry, never one past an entry still unsent. Never moves backwards;
+  /// throws an [ArgumentError] past the last entry.
   Future<void> markAcked(int seq) =>
       _serialize(() => _store.transaction((txn) async {
             if (seq <= await txn.ackedSeq()) return;

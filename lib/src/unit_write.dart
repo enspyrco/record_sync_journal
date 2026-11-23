@@ -112,8 +112,12 @@ final class RestoreWrite extends UnitWrite {
 /// The factories cover the four writes there are, so a malformed one (a `saw`
 /// on an edit, an unsalted edit that kills) cannot be asked for.
 final class UnitWriteDraft {
-  UnitWriteDraft._(
-      this.identity, this.unit, this.fields, this.kills, this.saw, this.salted);
+  /// Copies [kills] and [saw], so what the author saw is fixed when the draft
+  /// is made, whatever the caller does to its sets afterwards.
+  UnitWriteDraft._(this.identity, this.unit, this.fields, Set<WriteId> kills,
+      Set<WriteId>? saw, this.salted)
+      : kills = Set.unmodifiable(kills),
+        saw = saw == null ? null : Set.unmodifiable(saw);
 
   /// A salted write of [unit]'s whole field set. [observedLive] is the unit's
   /// live set when the operation was computed, never when it is appended.
@@ -231,6 +235,9 @@ enum Refusal {
 
   /// A write to a write-once unit that kills something.
   writeOnce,
+
+  /// Brackets nested deeper than [maxNestingDepth].
+  tooDeep,
 }
 
 /// What the door made of a frame.
@@ -286,8 +293,15 @@ final class Door {
   static const _required = {'v', 'identity', 'unit', 'fields', 'kills'};
 
   /// The record [identity] names, or null when no family here reads it.
-  ResolvedIdentity? resolve(Identity identity) =>
-      _families[identity.family]?.resolve(identity);
+  ResolvedIdentity? resolve(Identity identity) {
+    final family = _families[identity.family];
+    final read = family?.resolve(identity);
+    if (family == null || read == null || read.key.isEmpty) return null;
+    return (
+      id: RecordId.of(family: family.name, key: read.key),
+      schema: read.schema,
+    );
+  }
 
   /// Admits [frame] or says why not. In order: hash before any decode; strict
   /// UTF-8; JSON; the canonical re-encode test; then the exact schema.
@@ -301,6 +315,7 @@ final class Door {
     Refused refuse(Refusal r) => Refused(id, r);
 
     if (bytes.isEmpty || bytes[0] != 0x7B) return refuse(Refusal.notAnObject);
+    if (!_nestsWithin(bytes, maxNestingDepth)) return refuse(Refusal.tooDeep);
     final String text;
     try {
       text = const Utf8Decoder(allowMalformed: false).convert(bytes);
@@ -352,7 +367,7 @@ final class Door {
     if (identity == null) return refuse(Refusal.schema);
     final family = _families[identity.family];
     if (family == null) return refuse(Refusal.unknownFamily);
-    final resolved = family.resolve(identity);
+    final resolved = resolve(identity);
     if (resolved == null) return refuse(Refusal.invalidIdentity);
     final schema = resolved.schema;
 
@@ -399,7 +414,8 @@ final class Door {
     final unit = UnitName.parse(unitWire);
     final declared = unit == null ? null : schema.units[unit];
     if (unit == null || declared == null) return refuse(Refusal.unknownUnit);
-    if (!declared.containsAll(fieldsWire.keys)) return refuse(Refusal.fields);
+    final names = {for (final k in fieldsWire.keys) FieldName.parse(k)};
+    if (!declared.containsAll(names)) return refuse(Refusal.fields);
     if (salt == null &&
         (kills.isNotEmpty || !family.allowsDeterministicBirth)) {
       return refuse(Refusal.salt);
@@ -418,6 +434,36 @@ final class Door {
       kills: kills,
       salt: salt,
     ));
+  }
+
+  /// Whether no bracket in [bytes] opens deeper than [limit], counting only
+  /// brackets outside strings. Runs before any decoder sees the frame, so a
+  /// deep frame is refused in one pass and never recursed into.
+  static bool _nestsWithin(Uint8List bytes, int limit) {
+    var depth = 0;
+    var inString = false;
+    var escaped = false;
+    for (final b in bytes) {
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (b == 0x5C) {
+          escaped = true;
+        } else if (b == 0x22) {
+          inString = false;
+        }
+        continue;
+      }
+      switch (b) {
+        case 0x22:
+          inString = true;
+        case 0x7B || 0x5B:
+          if (++depth > limit) return false;
+        case 0x7D || 0x5D:
+          depth--;
+      }
+    }
+    return true;
   }
 
   /// The ids in [wire], or null unless every entry is a write id and they are

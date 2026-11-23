@@ -105,10 +105,13 @@ sealed class RecordView {
   /// restored.
   UnitState? get tomb => units[UnitName.tomb];
 
-  /// The units whose live writes hold more than one distinct value.
+  /// The units in a race: live writes with more than one distinct value, on a
+  /// unit a write can settle. A write-once unit with several values is left
+  /// out, because no write may ever name them; its [UnitState.shown] holds
+  /// them all for a fold to read.
   Set<UnitName> get contestedUnits => {
         for (final MapEntry(:key, :value) in units.entries)
-          if (value.contested) key
+          if (value.contested && !schema.writeOnce.contains(key)) key,
       };
 
   /// Every live write on the record's own units: what a delete computed now

@@ -83,7 +83,24 @@ void main() {
 
   test('a document is keyed by its Outline id', () {
     expect(_id(Identity.of('document', {'outlineId': 'outline-doc-7'})),
-        RecordId.of('outline-doc-7'));
+        RecordId.of(family: 'document', key: 'outline-doc-7'));
+  });
+
+  test('ids from different families never collide, whatever the keys', () {
+    // The document family's key is the raw Outline id, so it can spell the
+    // topicDocument family's key for (t1, d1) exactly.
+    final doc = Identity.of('document', {'outlineId': '2:t1:d1'});
+    final link =
+        Identity.of('topicDocument', {'topicId': 't1', 'documentId': 'd1'});
+    expect(_id(doc).key, _id(link).key);
+    expect(_id(doc), isNot(_id(link)));
+  });
+
+  test('a record id round-trips through its storage key', () {
+    final id = RecordId.of(family: 'a:b', key: '["x"]');
+    expect(RecordId.parseStorageKey(id.storageKey), id);
+    expect(RecordId.parseStorageKey('[ "a","b"]'), isNull);
+    expect(RecordId.parseStorageKey('["a"]'), isNull);
   });
 
   test('a topicDocument is a composite id, and the composite is injective', () {

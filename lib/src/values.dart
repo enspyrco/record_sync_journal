@@ -67,44 +67,68 @@ final class Salt {
   String toString() => hex;
 }
 
-/// A record's id. It is derived from the record's [Identity] by the app's
-/// identity family and never travels on the wire.
+/// A record's id: the family that derived it and that family's key for it.
+///
+/// Only the door makes one from an identity, so the family part is always the
+/// family that read the identity. Two families can therefore never derive the
+/// same id, whatever keys they choose; a family need only keep its own keys
+/// distinct. The id never travels on the wire.
 final class RecordId implements Comparable<RecordId> {
-  const RecordId._(this.value);
+  const RecordId._(this.family, this.key);
 
-  /// A record id; throws an [ArgumentError] when [value] is empty.
-  factory RecordId.of(String value) =>
-      parse(value) ??
-      (throw ArgumentError.value(value, 'value', 'a record id is non-empty'));
-
-  /// Reads a record id back, as a store does; null when [value] is empty.
-  static RecordId? parse(String value) =>
-      value.isEmpty ? null : RecordId._(value);
-
-  /// A UUIDv8 (RFC 9562) of SHA-256 over [bytes]: the hash's first 16 bytes
-  /// with the version and variant bits set.
-  factory RecordId.uuidV8OfSha256(List<int> bytes) {
-    final h = Uint8List.fromList(sha256.convert(bytes).bytes.sublist(0, 16));
-    h[6] = (h[6] & 0x0f) | 0x80;
-    h[8] = (h[8] & 0x3f) | 0x80;
-    final hex = _hexOf(h);
-    return RecordId._('${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
-        '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}');
+  /// The id [family] gives the record it keys as [key], for looking a record
+  /// up. Throws an [ArgumentError] when either is empty.
+  factory RecordId.of({required String family, required String key}) {
+    if (family.isEmpty || key.isEmpty) {
+      throw ArgumentError.value(
+          '$family/$key', 'id', 'family and key are non-empty');
+    }
+    return RecordId._(family, key);
   }
 
-  final String value;
+  /// Reads back an id a store saved as [storageKey]; null when it is not one.
+  static RecordId? parseStorageKey(String text) {
+    final Object? parsed;
+    try {
+      parsed = jsonDecode(text);
+    } on FormatException {
+      return null;
+    }
+    return switch (parsed) {
+      [String family, String key]
+          when family.isNotEmpty &&
+              key.isNotEmpty &&
+              canonicalJson([family, key]) == text =>
+        RecordId._(family, key),
+      _ => null,
+    };
+  }
+
+  /// The [IdentityFamily.name] that derived this id.
+  final String family;
+
+  /// The family's own key for the record.
+  final String key;
+
+  /// One string per id, for a store's key column: the canonical JSON of
+  /// `[family, key]`, so no two ids share one.
+  String get storageKey => canonicalJson([family, key]);
 
   @override
-  int compareTo(RecordId other) => value.compareTo(other.value);
+  int compareTo(RecordId other) {
+    final byFamily = family.compareTo(other.family);
+    return byFamily != 0 ? byFamily : key.compareTo(other.key);
+  }
 
   @override
-  bool operator ==(Object other) => other is RecordId && other.value == value;
+  bool operator ==(Object other) =>
+      other is RecordId && other.family == family && other.key == key;
 
   @override
-  int get hashCode => value.hashCode;
+  int get hashCode => Object.hash(family, key);
 
   @override
-  String toString() => value;
+  String toString() => '$family/$key';
 }
 
 /// The name of a merge unit: a group of fields always written whole.
@@ -233,56 +257,86 @@ final class Identity {
   String toString() => canonicalText;
 }
 
+/// The name of a field inside a unit. A leading underscore is reserved.
+final class FieldName implements Comparable<FieldName> {
+  const FieldName._(this.value);
+
+  /// A field name; throws an [ArgumentError] when empty or reserved.
+  factory FieldName.of(String value) =>
+      parse(value) ??
+      (throw ArgumentError.value(
+          value, 'value', 'a field name is non-empty and has no leading "_"'));
+
+  /// A field name, or null when empty or reserved.
+  static FieldName? parse(String value) =>
+      value.isEmpty || value.startsWith('_') ? null : FieldName._(value);
+
+  final String value;
+
+  @override
+  int compareTo(FieldName other) => value.compareTo(other.value);
+
+  @override
+  bool operator ==(Object other) => other is FieldName && other.value == value;
+
+  @override
+  int get hashCode => value.hashCode;
+
+  @override
+  String toString() => value;
+}
+
 /// The units a record type declares: each unit's name and the fields written
 /// whole under it. Every record also has the reserved [UnitName.tomb].
 final class RecordSchema {
   RecordSchema._(this.type, this.units, this.writeOnce);
 
-  /// A record type. Throws an [ArgumentError] when a unit or field name is
-  /// reserved (a leading `_`) or empty, or when [writeOnce] names an undeclared
-  /// unit.
+  /// A record type. Throws an [ArgumentError] when [writeOnce] names a unit
+  /// [units] does not declare.
   factory RecordSchema({
     required String type,
-    required Map<String, List<String>> units,
-    Set<String> writeOnce = const {},
+    required Map<UnitName, Set<FieldName>> units,
+    Set<UnitName> writeOnce = const {},
   }) {
-    final declared = <UnitName, Set<String>>{};
-    for (final MapEntry(key: name, value: fields) in units.entries) {
-      for (final f in fields) {
-        if (f.isEmpty || f.startsWith('_')) {
-          throw ArgumentError.value(f, 'field', 'non-empty, no leading "_"');
-        }
-      }
-      declared[UnitName.of(name)] = Set.unmodifiable(fields);
-    }
-    final once = {for (final n in writeOnce) UnitName.of(n)};
-    for (final n in once) {
-      if (!declared.containsKey(n)) {
+    for (final n in writeOnce) {
+      if (!units.containsKey(n)) {
         throw ArgumentError.value(n, 'writeOnce', 'not a unit of $type');
       }
     }
     return RecordSchema._(
-        type, Map.unmodifiable(declared), Set.unmodifiable(once));
+        type,
+        Map.unmodifiable({
+          for (final MapEntry(:key, :value) in units.entries)
+            key: Set<FieldName>.unmodifiable(value),
+        }),
+        Set.unmodifiable(writeOnce));
   }
 
   /// The type's name, as the app knows it.
   final String type;
 
   /// Unit → the fields written whole under it. [UnitName.tomb] is not listed.
-  final Map<UnitName, Set<String>> units;
+  final Map<UnitName, Set<FieldName>> units;
 
   /// Units written once, at birth. The door refuses a write to one of these
-  /// that names any write it saw: such a write can only be a birth.
+  /// that names any write it saw, so such a write can only be a birth, and a
+  /// unit two births race on stays that way: no write can settle it.
   final Set<UnitName> writeOnce;
 }
 
-/// The id and type an [IdentityFamily] reads from an identity.
+/// What an [IdentityFamily] reads from one identity: the family's own key for
+/// the record, and the record's type.
+typedef FamilyRecord = ({String key, RecordSchema schema});
+
+/// What a [Door] reads from an identity: the record's id and type.
 typedef ResolvedIdentity = ({RecordId id, RecordSchema schema});
 
-/// Reads one family of identities: derives each one's record id and type.
+/// Reads one family of identities: derives each one's key and type.
 ///
-/// The app supplies these. Two different identities must never derive the same
-/// id; [HashedIdentityFamily] holds to that up to SHA-256.
+/// The app supplies these. Two different identities in one family must never
+/// derive the same key; [HashedIdentityFamily] holds to that up to SHA-256.
+/// Keys from different families never meet, because a [RecordId] carries its
+/// family.
 abstract interface class IdentityFamily {
   /// The value of the identity's `family` field that selects this family.
   String get name;
@@ -292,13 +346,14 @@ abstract interface class IdentityFamily {
   bool get allowsDeterministicBirth;
 
   /// The record [identity] names, or null when it is not a valid member of
-  /// this family. [identity]'s `family` is already [name].
-  ResolvedIdentity? resolve(Identity identity);
+  /// this family. [identity]'s `family` is already [name]. A null or empty key
+  /// is refused by the door.
+  FamilyRecord? resolve(Identity identity);
 }
 
-/// A family whose id is a UUIDv8 of SHA-256 over the identity's canonical text,
-/// and whose identity holds exactly [fields], each a non-empty string or an
-/// integer.
+/// A family whose key is a UUIDv8 of SHA-256 over the identity's canonical
+/// text, and whose identity holds exactly [fields], each a non-empty string or
+/// an integer.
 final class HashedIdentityFamily implements IdentityFamily {
   HashedIdentityFamily({
     required this.name,
@@ -319,7 +374,7 @@ final class HashedIdentityFamily implements IdentityFamily {
   final bool allowsDeterministicBirth;
 
   @override
-  ResolvedIdentity? resolve(Identity identity) {
+  FamilyRecord? resolve(Identity identity) {
     final keys = identity.fields.json.keys.toSet();
     if (keys.length != fields.length || !keys.containsAll(fields)) return null;
     for (final k in keys) {
@@ -332,8 +387,19 @@ final class HashedIdentityFamily implements IdentityFamily {
       }
     }
     return (
-      id: RecordId.uuidV8OfSha256(utf8.encode(identity.canonicalText)),
-      schema: schema,
+      key: uuidV8OfSha256(utf8.encode(identity.canonicalText)),
+      schema: schema
     );
   }
+}
+
+/// A UUIDv8 (RFC 9562) of SHA-256 over [bytes]: the hash's first 16 bytes
+/// with the version and variant bits set.
+String uuidV8OfSha256(List<int> bytes) {
+  final h = Uint8List.fromList(sha256.convert(bytes).bytes.sublist(0, 16));
+  h[6] = (h[6] & 0x0f) | 0x80;
+  h[8] = (h[8] & 0x3f) | 0x80;
+  final hex = _hexOf(h);
+  return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+      '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
 }
