@@ -24,6 +24,8 @@ void main() {
         'body',
         {
           'name': 'Spaced repetition',
+          'description': null,
+          'sourceDocumentId': 'outline-doc-7',
           'tags': ['memory', 'learning'],
           'parentConceptId': null,
         }
@@ -34,6 +36,8 @@ void main() {
           'from': 'c1',
           'to': 'c2',
           'label': 'depends on',
+          'description': null,
+          'type': 'prerequisite',
         }
       ),
       Identity.of('quizItem', {'nonce': 'q1'}): (
@@ -42,6 +46,7 @@ void main() {
           'conceptId': 'c1',
           'question': 'Why space reviews?',
           'answer': 'Forgetting curve',
+          'rubric': null,
         }
       ),
       Identity.of('review', {'nonce': 'rv1'}): (
@@ -50,14 +55,16 @@ void main() {
           'quizItemId': 'q1',
           'rating': 3,
           'reviewedAt': 1764000000000,
-          // 0.9 as per-mille fixed point: the wire carries no doubles.
-          'desiredRetention': 900,
+          // 0.9 at engram's ×10000 fixed point: the wire carries no doubles.
+          'desiredRetention': 9000,
         }
       ),
       Identity.of('document', {'outlineId': 'outline-doc-7'}): (
         'ingest',
         {
           'title': 'Memory',
+          'updatedAt': 1764000000000,
+          'ingestedAt': 1764000100000,
           'ingestedText': '…',
         }
       ),
@@ -123,7 +130,12 @@ void main() {
   test('a review is write-once: a second write to it is refused', () async {
     final j = _device(1);
     final rv = Identity.of('review', {'nonce': 'rv1'});
-    final fields = {'quizItemId': 'q1', 'rating': 3, 'reviewedAt': 1};
+    final fields = {
+      'quizItemId': 'q1',
+      'rating': 3,
+      'reviewedAt': 1,
+      'desiredRetention': 9000,
+    };
     await j.write([
       UnitWriteDraft.content(
           identity: rv, unit: _u('event'), fields: fields, observedLive: {}),
@@ -143,7 +155,12 @@ void main() {
   test('the synthetic Again: two devices mint one write', () async {
     final newContent = {'question': 'Why?', 'answer': 'Changed'};
     final again = syntheticAgain('q1', newContent);
-    final event = {'quizItemId': 'q1', 'rating': 1, 'reviewedAt': 0};
+    final event = {
+      'quizItemId': 'q1',
+      'rating': 1,
+      'reviewedAt': 0,
+      'desiredRetention': 9000,
+    };
     final alice = _device(1);
     final bob = _device(2);
     final [a] = await alice.write([
@@ -166,7 +183,12 @@ void main() {
           UnitWriteDraft.deterministicBirth(
               identity: Identity.of('review', {'nonce': 'rv1'}),
               unit: _u('event'),
-              fields: {'rating': 3}),
+              fields: {
+                'quizItemId': 'q1',
+                'rating': 3,
+                'reviewedAt': 0,
+                'desiredRetention': 9000,
+              }),
         ]),
         throwsArgumentError);
   });
@@ -193,8 +215,26 @@ void main() {
     await alice.absorb((await bob.unsent()).single.bytes);
     final s = (await alice.read(_id(q)))!.units[_u('predicted')]!;
     expect(s.contested, isTrue);
-    // A single-user fold may choose, e.g. the smallest canonical text.
+    // Engram's fold takes the first: the smallest canonical text.
     expect(s.shown.first.json.integer('predictedDifficulty'), 420);
+  });
+
+  test('shown orders by canonical text, which is not numeric order', () {
+    // Difficulty 10.0 and 9.99 at ×100: "1000" sorts before "999". The order
+    // is deterministic, which is all a fold needs, but it is not "smallest".
+    final m = Door(engramFamilies);
+    final q = Identity.of('quizItem', {'nonce': 'q1'});
+    UnitWrite w(int d, int seed) => switch (m.admit(UnitWriteDraft.content(
+            identity: q,
+            unit: _u('predicted'),
+            fields: {'predictedDifficulty': d},
+            observedLive: {}).encode(Salt.random(Random(seed))))) {
+          Admitted(:final write) => write,
+          Refused(:final reason) => throw StateError('$reason'),
+        };
+    final s = UnitState.of([w(999, 1), w(1000, 2)]);
+    expect([for (final f in s.shown) f.json.integer('predictedDifficulty')],
+        [1000, 999]);
   });
 
   test('a double is refused before it is drafted', () {

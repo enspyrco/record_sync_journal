@@ -14,7 +14,7 @@ final concept = RecordSchema(type: 'concept', units: {
     'tags',
     'parentConceptId'
   ],
-  // A vector of doubles crosses as fixed-point integers.
+  // A vector of doubles crosses as integers at engram's ×10000 fixed point.
   'embedding': ['embedding'],
 });
 
