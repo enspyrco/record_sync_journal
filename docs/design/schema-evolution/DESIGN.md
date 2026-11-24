@@ -70,9 +70,12 @@ the vectors. The README says so.
 
 - `Refusal` gains `unknownVersion`. **The door reads `v` before the v=1
   grammar**: after the object, depth, UTF-8 and canonical tests, an integer
-  `v` other than 1 is `unknownVersion`, whatever other keys the frame has.
-  Only a missing or non-integer `v`, or a v=1 frame that breaks the v=1
-  grammar, is `schema`. Every future wire keeps `v` as an integer top-level
+  `v` above 1 is `unknownVersion`, whatever other keys the frame has.
+  A missing, non-integer or below-1 `v`, or a v=1 frame that breaks the v=1
+  grammar, is `schema`. Every rule of the v=1 grammar that needs no family
+  runs before the family is looked up, and every rule that needs the family
+  but not the unit runs before the unit is, so `unknownFamily` and
+  `unknownUnit` only ever name a write some build could have made. Every future wire keeps `v` as an integer top-level
   key: that's the part of the wire that can never change. (Today the key-set
   test runs first, at `lib/src/unit_write.dart:350`, before `v` at line 358, so
   a future wire with a new key would refuse as `schema`.)

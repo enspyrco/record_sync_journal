@@ -226,11 +226,11 @@ enum Refusal {
   /// The parsed value does not re-encode to exactly the decoded text.
   notCanonical,
 
-  /// `v` missing or not an integer, or a v=1 write with a key missing or
-  /// extra, or a value of the wrong type.
+  /// `v` missing, not an integer or below 1, or a v=1 write with a key
+  /// missing or extra, or a value of the wrong type.
   schema,
 
-  /// `v` is an integer other than 1: a wire this build doesn't know.
+  /// `v` is an integer above 1: a wire this build doesn't know.
   unknownVersion,
 
   /// `kills` or `saw` holds an entry that is not a write id, or is not sorted
@@ -371,9 +371,10 @@ final class Door {
     final wire = JsonObject.parse(parsed);
     if (wire == null) return refuse(Refusal.schema);
     // `v` is read before any v=1 rule, so a later wire with other keys is
-    // refused as a newer version, not as malformed.
+    // refused as a newer version, not as malformed. Versions only rise, so
+    // one below 1 was never written by any build.
     final v = wire.raw('v');
-    if (v is! int) return refuse(Refusal.schema);
+    if (v is! int || v < 1) return refuse(Refusal.schema);
     if (v != 1) return refuse(Refusal.unknownVersion);
     final keys = wire.keys.toSet();
     if (!_keys.containsAll(keys) || !keys.containsAll(_required)) {
@@ -412,7 +413,7 @@ final class Door {
     // up, so `unknownFamily` and `unknownUnit`, which reads skip as newer,
     // only ever name a well-formed write, whatever families this build has.
     final _Parsed shape;
-    switch (_shapeOf(wire, unitWire, fieldsWire, salt)) {
+    switch (_shapeOf(wire, unitWire, fieldsWire, salt, kills)) {
       case _Malformed(:final reason):
         return refuse(reason);
       case final _Parsed parsed:
@@ -447,13 +448,14 @@ final class Door {
           salt: salt,
         ));
       case _ContentShape(:final unit, :final names):
+        // Needs the family but not the unit, so it comes before `unknownUnit`.
+        if (salt == null && !f.allowsDeterministicBirth) {
+          return refuse(Refusal.salt);
+        }
         final schema = r.schema;
         final declared = schema.units[unit];
         if (declared == null) return refuse(Refusal.unknownUnit);
         if (!declared.containsAll(names)) return refuse(Refusal.fields);
-        if (salt == null && (kills.isNotEmpty || !f.allowsDeterministicBirth)) {
-          return refuse(Refusal.salt);
-        }
         if (schema.writeOnce.contains(unit) && kills.isNotEmpty) {
           return refuse(Refusal.writeOnce);
         }
@@ -488,8 +490,8 @@ final class Door {
 
   /// What the write is, by every rule that needs no schema: a delete, a
   /// restore, or content naming a well-formed unit and field names.
-  static _ShapeOrMalformed _shapeOf(
-      JsonObject wire, String unitWire, JsonObject fieldsWire, Salt? salt) {
+  static _ShapeOrMalformed _shapeOf(JsonObject wire, String unitWire,
+      JsonObject fieldsWire, Salt? salt, Set<WriteId> kills) {
     final hasSaw = wire.has('saw');
     if (unitWire == UnitName.tomb.value) {
       if (fieldsWire.keys.length != 1) return const _Malformed(Refusal.fields);
@@ -509,6 +511,8 @@ final class Door {
           : _DeleteShape(saw);
     }
     if (hasSaw) return const _Malformed(Refusal.saw);
+    // Only a birth may be unsalted, and a birth kills nothing.
+    if (salt == null && kills.isNotEmpty) return const _Malformed(Refusal.salt);
     // A name no build can declare is malformed, never a newer unit.
     final unit = UnitName.parse(unitWire);
     if (unit == null) return const _Malformed(Refusal.schema);
