@@ -120,10 +120,13 @@ contract an app's transport must keep, and the README states it:
   on at least one shelf, pending Nick's V8 ruling.)
 - **One ordered log instead of per-publisher logs** (engram's Firestore
   `sync_log_v2`): one bookmark stands in for the per-publisher cursors. The
-  bookmark must stop *before* a frame `absorb` returns as `NotAdmitted` with
-  `isNewerSchema`, exactly as it stops before one it can't parse, so the
-  upgraded build reads on from there. A bookmark that moves past it loses the
-  frame for good.
+  bookmark is where a restart reads from, and reading carries on past it.
+  It holds at the first frame `absorb` returns as `NotAdmitted` with
+  `isNewerSchema`, so the upgraded build reads again from there, and a
+  bookmark that moved past it would lose that frame for good. Any other
+  `NotAdmitted` is a dead frame that no build will ever admit: the bookmark
+  passes it, and the app may report it. Holding at a dead frame would hold
+  the bookmark forever, and every restart would read the whole tail again.
 - **Replay is single-flight through its own lock**, never the lock the store's
   transactions take. That lock isn't reentrant (codraw's `navigator.locks`),
   and replay opens a transaction for each frame it absorbs, so holding it would

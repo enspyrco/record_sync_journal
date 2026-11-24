@@ -46,6 +46,9 @@ RecordJournal _older(JournalStore s) =>
 RecordJournal _newer(JournalStore s) => RecordJournal(
     store: s, families: [_newerNoteFamily, _stickerFamily], random: Random(2));
 
+Matcher _refused(Refusal reason) =>
+    isA<RefusedStoredWrite>().having((f) => f.reason, 'reason', reason);
+
 Identity _sticker(String nonce) =>
     Identity.of(FamilyName.of('sticker'), {'nonce': nonce});
 
@@ -137,8 +140,35 @@ void main() {
         all.whereType<UnreadableRecord>().single,
         isA<UnreadableRecord>()
             .having((r) => r.id, 'id', aId)
-            .having((r) => r.reason, 'reason', Refusal.fields));
+            .having((r) => r.fault, 'fault', _refused(Refusal.fields)));
     expect(all.whereType<Readable>(), hasLength(1));
+  });
+
+  test('a write stored under another record makes that record unreadable',
+      () async {
+    final store = InMemoryJournalStore();
+    final older = _older(store);
+    final b = note('b');
+    final bId = noteDoor.resolve(b)!.id;
+    await older.write([
+      UnitWriteDraft.content(
+          identity: b, unit: body, fields: {'text': 'b'}, observedLive: {}),
+    ]);
+    final [misfiled] = await older.unsent();
+    await store.transaction((txn) =>
+        txn.project(aId, WriteId.ofBytes(misfiled.bytes), misfiled.bytes));
+
+    await expectLater(older.read(aId), throwsStateError);
+    expect(await older.readAll(), [
+      for (final id in [aId, bId]..sort())
+        id == aId
+            ? isA<UnreadableRecord>().having(
+                (r) => r.fault,
+                'fault',
+                isA<MisfiledStoredWrite>()
+                    .having((f) => f.namedRecord, 'namedRecord', bId))
+            : isA<Readable>(),
+    ]);
   });
 
   test('a stored write with a unit name no build can declare throws', () async {
@@ -151,7 +181,8 @@ void main() {
     final older = _older(store);
     await expectLater(older.read(aId), throwsStateError);
     expect(await older.readAll(), [
-      isA<UnreadableRecord>().having((r) => r.reason, 'reason', Refusal.schema)
+      isA<UnreadableRecord>()
+          .having((r) => r.fault, 'fault', _refused(Refusal.schema))
     ]);
   });
 

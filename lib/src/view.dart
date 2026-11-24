@@ -228,12 +228,37 @@ final class UnreadRecord extends IntactRecordRead {
   final Set<UnreadWrite> unread;
 }
 
-/// A stored write of the record is refused for a reason no newer build can
-/// cause: the freeze was broken or the store is corrupt.
+/// A stored write of the record can't be part of its view, for a reason no
+/// newer build can cause: the freeze was broken or the store is corrupt.
 final class UnreadableRecord extends RecordRead {
-  const UnreadableRecord(this.id, this.reason);
+  const UnreadableRecord(this.id, this.fault);
 
   @override
   final RecordId id;
+  final StoredWriteFault fault;
+}
+
+/// What is wrong with a stored write that makes its record unreadable.
+sealed class StoredWriteFault {
+  const StoredWriteFault();
+}
+
+/// The door refuses the write for a reason that isn't
+/// [Refusal.isNewerSchema].
+final class RefusedStoredWrite extends StoredWriteFault {
+  const RefusedStoredWrite(this.reason);
   final Refusal reason;
+
+  @override
+  String toString() => 'refused: $reason';
+}
+
+/// The door admits the write, but it names another record than the one it is
+/// stored under.
+final class MisfiledStoredWrite extends StoredWriteFault {
+  const MisfiledStoredWrite(this.namedRecord);
+  final RecordId namedRecord;
+
+  @override
+  String toString() => 'filed here but names $namedRecord';
 }

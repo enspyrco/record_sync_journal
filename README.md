@@ -68,10 +68,11 @@ bit, or a family's name, identity fields, key or `resolve`. Never rename or
 reuse a name; deprecate it instead.
 
 The package keeps one more rule for its own wire: every future version stays a
-canonical JSON object within `maxNestingDepth`, with an integer `v`. The door
-checks those before it can read `v`, so a wire that broke them would be refused
-as malformed by every older build, not left out as newer. Any other change to
-the wire (salt, ids, keys, depth) bumps `v`.
+canonical JSON object within today's `maxNestingDepth`, with an integer `v`.
+The door checks those before it can read `v`, so a wire that broke them would
+be refused as malformed by every older build, not left out as newer. Bumping
+`v` can't fix that, so the depth limit can never rise. Any other change to the
+wire (salt, ids, keys) bumps `v`.
 
 Under that rule, a write an older build can't read is refused as
 `unknownFamily`, `unknownUnit` or `unknownVersion` (`Refusal.isNewerSchema`),
