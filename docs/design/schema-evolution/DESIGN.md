@@ -113,6 +113,17 @@ contract an app's transport must keep, and the README states it:
   log to an empty page, list the publishers again, and find no publisher and no
   page not yet read. Only then is `replayPending` cleared. A crash leaves it
   set, and the next start resumes.
+- **More than one shelf**: the replay reads the union of every shelf, per
+  publisher, and isn't done until every shelf has answered with an empty page.
+  An entry acknowledged by one shelf is then found whenever that shelf is up;
+  an outage delays the replay, and never shortens it. (codraw B2 acknowledges
+  on at least one shelf, pending Nick's V8 ruling.)
+- **One ordered log instead of per-publisher logs** (engram's Firestore
+  `sync_log_v2`): one bookmark stands in for the per-publisher cursors. The
+  bookmark must stop *before* a frame `absorb` returns as `NotAdmitted` with
+  `isNewerSchema`, exactly as it stops before one it can't parse, so the
+  upgraded build reads on from there. A bookmark that moves past it loses the
+  frame for good.
 - **Replay is single-flight through its own lock**, never the lock the store's
   transactions take. That lock isn't reentrant (codraw's `navigator.locks`),
   and replay opens a transaction for each frame it absorbs, so holding it would

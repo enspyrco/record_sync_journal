@@ -103,7 +103,11 @@ final class RecordJournal {
       final ids = [...await txn.projectedRecords()]..sort();
       return [for (final id in ids) (id, await txn.projected(id))];
     });
-    return [for (final (id, bytes) in byRecord) _readRecord(id, bytes)];
+    // A record listed with nothing projected is not stored, as in [read].
+    return [
+      for (final (id, bytes) in byRecord)
+        if (bytes.isNotEmpty) _readRecord(id, bytes),
+    ];
   }
 
   /// Rebuilds the projection from the log alone. It must equal the projection
@@ -155,11 +159,14 @@ final class RecordJournal {
       switch (door.admit(b)) {
         case Admitted(:final write):
           writes.add(write);
-        case Refused refused when refused.reason.isNewerSchema:
-          unread.add(UnreadWrite.of(refused));
         case Refused refused:
-          if (broken == null || refused.id.compareTo(broken.id) < 0) {
-            broken = refused;
+          switch (UnreadWrite.parse(refused)) {
+            case final UnreadWrite u:
+              unread.add(u);
+            case null:
+              if (broken == null || refused.id.compareTo(broken.id) < 0) {
+                broken = refused;
+              }
           }
       }
     }

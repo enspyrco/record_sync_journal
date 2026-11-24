@@ -451,9 +451,12 @@ final class Door {
     }
 
     if (hasSaw) return refuse(Refusal.saw);
+    // A name no build can declare is malformed, not newer: only a well-formed,
+    // undeclared name is `unknownUnit`, which reads skip.
     final unit = UnitName.parse(unitWire);
-    final declared = unit == null ? null : schema.units[unit];
-    if (unit == null || declared == null) return refuse(Refusal.unknownUnit);
+    if (unit == null) return refuse(Refusal.schema);
+    final declared = schema.units[unit];
+    if (declared == null) return refuse(Refusal.unknownUnit);
     final names = {for (final k in fieldsWire.keys) FieldName.parse(k)};
     if (!declared.containsAll(names)) return refuse(Refusal.fields);
     if (salt == null &&

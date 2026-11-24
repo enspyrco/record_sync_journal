@@ -50,9 +50,10 @@ sealed class RecordView {
         unread = a.$5;
 
   /// The view of [writes], all of one record, with [unread] the record's
-  /// stored writes this build left out. Throws an [ArgumentError] when
-  /// [writes] is empty or spans records. Order and duplicates make no
-  /// difference.
+  /// stored writes this build left out. An [UnreadWrite] doesn't say which
+  /// record it belongs to, so the caller must pair them. Throws an
+  /// [ArgumentError] when [writes] is empty or spans records. Order and
+  /// duplicates make no difference.
   factory RecordView.of(Iterable<UnitWrite> writes,
       {Iterable<UnreadWrite> unread = const []}) {
     final byUnit = <UnitName, List<UnitWrite>>{};
@@ -173,14 +174,11 @@ typedef _Args = (
 final class UnreadWrite {
   UnreadWrite._(this._id, this.reason);
 
-  /// The write [refused] names. Throws an [ArgumentError] unless its reason
-  /// [Refusal.isNewerSchema].
-  factory UnreadWrite.of(Refused refused) {
-    if (!refused.reason.isNewerSchema) {
-      throw ArgumentError.value(refused, 'refused', 'not a newer schema');
-    }
-    return UnreadWrite._(refused.id, refused.reason);
-  }
+  /// The write [refused] names, or null unless a newer build could have
+  /// written it ([Refusal.isNewerSchema]).
+  static UnreadWrite? parse(Refused refused) => refused.reason.isNewerSchema
+      ? UnreadWrite._(refused.id, refused.reason)
+      : null;
 
   final WriteId _id;
 

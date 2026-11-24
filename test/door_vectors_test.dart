@@ -202,9 +202,14 @@ final Map<String, (String, Refusal?)> _textVectors = {
     '{"fields":{},$_id,"kills":[],$_salt,"unit":"nope","v":1}',
     Refusal.unknownUnit
   ),
+  // No build can declare it, so it is malformed, never a newer unit.
   'reserved unit name': (
     '{"fields":{},$_id,"kills":[],$_salt,"unit":"_x","v":1}',
-    Refusal.unknownUnit
+    Refusal.schema
+  ),
+  'empty unit name': (
+    '{"fields":{},$_id,"kills":[],$_salt,"unit":"","v":1}',
+    Refusal.schema
   ),
   'undeclared field': (_bodyWith('{"zzz":1}'), Refusal.fields),
   'tomb with a second field': (
