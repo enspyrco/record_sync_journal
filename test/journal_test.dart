@@ -14,7 +14,7 @@ RecordJournal _journal(JournalStore store, {int seed = 1}) => RecordJournal(
     random: Random(seed));
 
 Future<String> _snapshot(RecordJournal j) async =>
-    (await j.readAll()).map(describe).join('\n\n');
+    (await j.readAll()).map(describeRead).join('\n\n');
 
 void main() {
   final a = note('a');
@@ -26,7 +26,7 @@ void main() {
       UnitWriteDraft.content(
           identity: a, unit: body, fields: {'text': 'x'}, observedLive: {}),
     ]);
-    final v = (await j.read(aId))!;
+    final v = (await viewOf(j, aId))!;
     expect(v, isA<DrawnRecord>());
     expect(v.units[body]!.liveIds, {w});
     expect(v.id, aId);
@@ -38,7 +38,7 @@ void main() {
       UnitWriteDraft.content(
           identity: a, unit: body, fields: {'text': 'x'}, observedLive: {}),
     ]);
-    final observed = (await j.read(aId))!.units[body]!.liveIds;
+    final observed = (await viewOf(j, aId))!.units[body]!.liveIds;
     final [w2] = await j.write([
       UnitWriteDraft.content(
           identity: a,
@@ -46,7 +46,7 @@ void main() {
           fields: {'text': 'y'},
           observedLive: observed),
     ]);
-    expect((await j.read(aId))!.units[body]!.liveIds, {w2});
+    expect((await viewOf(j, aId))!.units[body]!.liveIds, {w2});
   });
 
   test('a refused draft stores nothing, even beside a good one', () async {
@@ -123,7 +123,7 @@ void main() {
       final d = devices[rng.nextInt(devices.length)];
       final id = ids[rng.nextInt(ids.length)];
       final rid = noteDoor.resolve(id)!.id;
-      final v = await d.read(rid);
+      final v = await viewOf(d, rid);
       final draft = switch (rng.nextInt(4)) {
         0 => UnitWriteDraft.delete(
             identity: id,

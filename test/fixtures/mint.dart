@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:record_sync_journal/record_sync_journal.dart';
+import 'package:test/test.dart';
 
 import 'notes.dart';
 
@@ -55,3 +56,37 @@ String describe(RecordView v) {
   };
   return '${v.id} $kind\n${units.join('\n')}';
 }
+
+/// A stored record as text, whatever the read found.
+String describeRead(RecordRead r) => switch (r) {
+      Readable(:final view) =>
+        '${describe(view)}${view.unread.isEmpty ? '' : '\nunread=${view.unread.length}'}',
+      UnreadRecord(:final id, :final unread) => '$id unread=${unread.length}',
+      UnreadableRecord(:final id, :final reason) => '$id unreadable $reason',
+    };
+
+/// [record]'s view, or null when nothing is stored; fails the test when the
+/// journal left any write out.
+Future<RecordView?> viewOf(RecordJournal j, RecordId record) async =>
+    switch (await j.read(record)) {
+      null => null,
+      Readable(:final view) when view.unread.isEmpty => view,
+      final other => fail('$record was not read whole: $other'),
+    };
+
+/// [record]'s view even when the journal left writes out; fails the test
+/// unless at least one stored write was read.
+Future<RecordView> readableOf(RecordJournal j, RecordId record) async =>
+    switch (await j.read(record)) {
+      Readable(:final view) => view,
+      final other => fail('$record has nothing readable: $other'),
+    };
+
+/// Every stored record's view; fails the test when any is not read whole.
+Future<List<RecordView>> viewsOf(RecordJournal j) async => [
+      for (final r in await j.readAll())
+        switch (r) {
+          Readable(:final view) when view.unread.isEmpty => view,
+          _ => fail('${r.id} was not read whole: ${describeRead(r)}'),
+        },
+    ];
