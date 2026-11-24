@@ -24,17 +24,19 @@ export 'src/unit_write.dart'
 export 'src/values.dart'
     show
         CanonicalObject,
+        FamilyName,
         FamilyRecord,
         FieldName,
         HashedIdentityFamily,
         Identity,
         IdentityFamily,
         RecordId,
+        RecordKey,
         RecordSchema,
+        RecordType,
         ResolvedIdentity,
         Salt,
         UnitName,
-        WriteId,
-        uuidV8OfSha256;
+        WriteId;
 export 'src/view.dart'
     show DrawnRecord, GhostRecord, HiddenRecord, RecordView, UnitState;

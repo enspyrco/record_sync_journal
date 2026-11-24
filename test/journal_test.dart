@@ -55,7 +55,7 @@ void main() {
     final good = UnitWriteDraft.content(
         identity: a, unit: body, fields: {'text': 'x'}, observedLive: {});
     final unknown = UnitWriteDraft.content(
-        identity: Identity.of('nope', {'nonce': 'n'}),
+        identity: Identity.of(FamilyName.of('nope'), {'nonce': 'n'}),
         unit: body,
         fields: {},
         observedLive: {});
@@ -211,6 +211,35 @@ void main() {
         contains(w));
   });
 
+  test('a store that runs each transaction body twice changes nothing',
+      () async {
+    // sembast on the web re-runs a body when another tab committed first and
+    // keeps only the last run; the journal's bodies must act only through txn.
+    Future<String> run(JournalStore store) async {
+      final j = _journal(store);
+      final other = _journal(InMemoryJournalStore(), seed: 9);
+      await j.write([
+        UnitWriteDraft.content(
+            identity: a, unit: body, fields: {'text': 'x'}, observedLive: {}),
+      ]);
+      await other.write([
+        UnitWriteDraft.content(
+            identity: a, unit: title, fields: {'title': 't'}, observedLive: {}),
+      ]);
+      final frame = (await other.unsent()).single.bytes;
+      expect(await j.absorb(frame), isA<Appended>());
+      expect(await j.absorb(frame), isA<AlreadyHeld>());
+      await j.markAcked(1);
+      await j.recompute();
+      final seqs = [for (final e in await j.unsent()) e.seq];
+      return '${await _snapshot(j)}\nunsent=$seqs';
+    }
+
+    final replaying = _ReplayingStore();
+    expect(await run(replaying), await run(InMemoryJournalStore()));
+    expect(replaying.discardedRuns, greaterThanOrEqualTo(6));
+  });
+
   test('a store holding a lock that is not reentrant never deadlocks',
       () async {
     // The shape a cross-tab store takes: one non-reentrant lock, taken inside
@@ -318,4 +347,32 @@ final class _LockedStore implements JournalStore {
           held = false;
         }
       });
+}
+
+/// Thrown to throw away a body's first run.
+final class _Discard implements Exception {
+  const _Discard();
+}
+
+/// An in-memory store that runs every transaction body twice: once on a copy
+/// it throws away, then for real, as sembast on the web does when another tab
+/// committed first.
+final class _ReplayingStore implements JournalStore {
+  final _inner = InMemoryJournalStore();
+  int discardedRuns = 0;
+
+  @override
+  Future<T> transaction<T>(
+      Future<T> Function(JournalTransaction txn) body) async {
+    try {
+      await _inner.transaction((txn) async {
+        await body(txn);
+        discardedRuns++;
+        throw const _Discard();
+      });
+    } on _Discard {
+      // The first run is thrown away by design.
+    }
+    return _inner.transaction(body);
+  }
 }
