@@ -6,50 +6,63 @@ import 'dart:convert';
 
 import 'package:record_sync_journal/record_sync_journal.dart';
 
-final concept = RecordSchema(type: 'concept', units: {
-  'body': [
-    'name',
-    'description',
-    'sourceDocumentId',
-    'tags',
-    'parentConceptId'
-  ],
-  // A vector of doubles crosses as integers at engram's ×10000 fixed point.
-  'embedding': ['embedding'],
-});
+Map<UnitName, Set<FieldName>> _units(Map<String, List<String>> units) => {
+      for (final MapEntry(:key, :value) in units.entries)
+        UnitName.of(key): {for (final f in value) FieldName.of(f)},
+    };
 
-final relationship = RecordSchema(type: 'relationship', units: {
-  'body': ['from', 'to', 'label', 'description', 'type'],
-});
+final concept = RecordSchema(
+    type: 'concept',
+    units: _units({
+      'body': [
+        'name',
+        'description',
+        'sourceDocumentId',
+        'tags',
+        'parentConceptId'
+      ],
+      // A vector of doubles crosses as integers at engram's ×10000 fixed point.
+      'embedding': ['embedding'],
+    }));
+
+final relationship = RecordSchema(
+    type: 'relationship',
+    units: _units({
+      'body': ['from', 'to', 'label', 'description', 'type'],
+    }));
 
 final quizItem = RecordSchema(
   type: 'quizItem',
-  units: {
+  units: _units({
     'content': ['conceptId', 'question', 'answer', 'rubric'],
     'predicted': ['predictedDifficulty'],
-  },
-  writeOnce: {'predicted'},
+  }),
+  writeOnce: {UnitName.of('predicted')},
 );
 
 final review = RecordSchema(
   type: 'review',
-  units: {
+  units: _units({
     'event': ['quizItemId', 'rating', 'reviewedAt', 'desiredRetention'],
-  },
-  writeOnce: {'event'},
+  }),
+  writeOnce: {UnitName.of('event')},
 );
 
-final document = RecordSchema(type: 'document', units: {
-  'ingest': ['title', 'updatedAt', 'ingestedAt', 'ingestedText'],
-  'collection': ['collectionId', 'collectionName'],
-});
+final document = RecordSchema(
+    type: 'document',
+    units: _units({
+      'ingest': ['title', 'updatedAt', 'ingestedAt', 'ingestedText'],
+      'collection': ['collectionId', 'collectionName'],
+    }));
 
-final topic = RecordSchema(type: 'topic', units: {
-  'created': ['createdAt'],
-  'name': ['name'],
-  'description': ['description'],
-  'ingested': ['lastIngestedAt'],
-});
+final topic = RecordSchema(
+    type: 'topic',
+    units: _units({
+      'created': ['createdAt'],
+      'name': ['name'],
+      'description': ['description'],
+      'ingested': ['lastIngestedAt'],
+    }));
 
 /// Membership only: the record is its `_tomb`.
 final topicDocument = RecordSchema(type: 'topicDocument', units: {});
@@ -66,16 +79,15 @@ final class OutlineDocumentFamily implements IdentityFamily {
   bool get allowsDeterministicBirth => false;
 
   @override
-  ResolvedIdentity? resolve(Identity identity) {
+  FamilyRecord? resolve(Identity identity) {
     final json = identity.fields.json;
     if (json.keys.length != 1 || json.raw('outlineId') is! String) return null;
-    final id = RecordId.parse(json.string('outlineId'));
-    return id == null ? null : (id: id, schema: document);
+    return (key: json.string('outlineId'), schema: document);
   }
 }
 
 /// A topic's membership of a document, keyed by both. Each part is
-/// length-prefixed so no two pairs derive one id (`a__b`+`c` vs `a`+`b__c`).
+/// length-prefixed so no two pairs derive one key (`a__b`+`c` vs `a`+`b__c`).
 final class TopicDocumentFamily implements IdentityFamily {
   @override
   String get name => 'topicDocument';
@@ -84,7 +96,7 @@ final class TopicDocumentFamily implements IdentityFamily {
   bool get allowsDeterministicBirth => false;
 
   @override
-  ResolvedIdentity? resolve(Identity identity) {
+  FamilyRecord? resolve(Identity identity) {
     final json = identity.fields.json;
     final keys = json.keys.toSet();
     if (keys.length != 2 || !keys.containsAll(['topicId', 'documentId'])) {
@@ -95,7 +107,7 @@ final class TopicDocumentFamily implements IdentityFamily {
     }
     final (t, d) = (json.string('topicId'), json.string('documentId'));
     if (t.isEmpty || d.isEmpty) return null;
-    return (id: RecordId.of('td:${t.length}:$t:$d'), schema: topicDocument);
+    return (key: '${t.length}:$t:$d', schema: topicDocument);
   }
 }
 

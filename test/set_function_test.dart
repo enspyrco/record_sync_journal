@@ -98,6 +98,66 @@ void main() {
       expect(birth(1).id, birth(2).id);
     });
 
+    test('a draft keeps what its author saw, whatever happens to the set', () {
+      final w1 = m.edit(a, body, {'text': 'x'});
+      final w2 = m.edit(a, body, {'text': 'y'});
+      final observed = {w1.id};
+      final draft = UnitWriteDraft.content(
+          identity: a,
+          unit: body,
+          fields: {'text': 'z'},
+          observedLive: observed);
+      observed.add(w2.id);
+      final written = m.admit(draft);
+      expect(written.kills, {w1.id});
+    });
+
+    test('a write-once unit with two births is shown, not listed as a race',
+        () {
+      final schema = RecordSchema(type: 'once', units: {
+        body: fieldNames(['text']),
+      }, writeOnce: {
+        body
+      });
+      final family =
+          HashedIdentityFamily(name: 'once', schema: schema, fields: {'nonce'});
+      final door = Door([family]);
+      final id = Identity.of('once', {'nonce': 'o'});
+      final births = [
+        for (final t in ['x', 'y'])
+          m.admit(
+              UnitWriteDraft.content(
+                  identity: id,
+                  unit: body,
+                  fields: {'text': t},
+                  observedLive: {}),
+              door: door),
+      ];
+      final v = view(births);
+      expect(v.units[body]!.contested, isTrue);
+      expect(v.units[body]!.shown, hasLength(2));
+      expect(v.contestedUnits, isEmpty, reason: 'no write can settle it');
+    });
+
+    test('a field nests as deep as a write allows, and no deeper', () {
+      Object? nest(int depth) => depth == 0 ? 1 : [nest(depth - 1)];
+      expect(canonicalJsonOrNull(nest(maxNestingDepth)), isNotNull);
+      expect(canonicalJsonOrNull(nest(maxNestingDepth + 1)), isNull);
+      // The write object and its fields object take two levels of the frame.
+      final deepest = m.edit(a, body, {'n': nest(maxNestingDepth - 2)});
+      expect(noteDoor.admit(deepest.bytes), isA<Admitted>());
+      // The constructor alone, so a refusal at encode or at the door can't
+      // stand in for it.
+      expect(
+          () => UnitWriteDraft.content(
+              identity: a,
+              unit: body,
+              fields: {'n': nest(maxNestingDepth - 1)},
+              observedLive: {}),
+          throwsArgumentError,
+          reason: 'refused when drafted, not at write time');
+    });
+
     test('a double cannot be drafted', () {
       expect(() => m.edit(a, body, {'n': 0.5}), throwsArgumentError);
     });
@@ -212,28 +272,44 @@ void main() {
       }
     });
 
-    test('no admitted write makes a view throw, live never empty', () {
+    test('no admitted write makes a view throw; live is exactly the unkilled',
+        () {
       final rng = Random(11);
+      var absentKills = 0;
       for (var round = 0; round < 200; round++) {
         final writes = _history(Minter(1000 + round), rng);
+        final ids = {for (final w in writes) w.id};
         final v = view(writes);
-        for (final s in v.units.values) {
+        for (final MapEntry(key: u, value: s) in v.units.entries) {
+          final ofUnit = [
+            for (final w in writes)
+              if (w.unit == u) w
+          ];
+          final named = {for (final w in ofUnit) ...w.kills};
+          absentKills += named.where((k) => !ids.contains(k)).length;
+          expect(s.live, {
+            for (final w in ofUnit)
+              if (!named.contains(w.id)) w
+          });
           expect(s.live, isNotEmpty);
-          expect(s.shown, isNotEmpty);
+          expect(s.shown, {for (final w in s.live) w.fields});
         }
       }
+      expect(absentKills, greaterThan(0),
+          reason: 'the histories must name undelivered writes');
     });
   });
 }
 
 /// A random history on one record: edits, deletes and restores, each seeing a
-/// random subset of what came before (including nothing), and some naming
-/// writes that are never delivered.
+/// random subset of what was authored before it (including nothing). Some
+/// writes are never delivered, so delivered writes can name absent ones (C4).
 List<UnitWrite> _history(Minter m, Random rng) {
   final id = note('p');
+  final authored = <UnitWrite>[];
   final all = <UnitWrite>[];
   Set<UnitWrite> someOf(UnitName u) => {
-        for (final w in all)
+        for (final w in authored)
           if (w.unit == u && rng.nextBool()) w,
       };
   final n = 2 + rng.nextInt(14);
@@ -246,7 +322,7 @@ List<UnitWrite> _history(Minter m, Random rng) {
           content: {...someOf(body), ...someOf(title)}),
       _ => m.restore(id, tomb: someOf(UnitName.tomb)),
     };
-    // Some writes are authored but never delivered: their kills still land.
+    authored.add(w);
     if (rng.nextInt(6) > 0) all.add(w);
   }
   if (all.isEmpty) all.add(m.edit(id, body, {'text': 'only'}));

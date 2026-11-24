@@ -9,21 +9,63 @@ library;
 /// The largest integer every platform holds exactly: `2^53 − 1`.
 const int maxSafeInteger = 9007199254740991;
 
+/// The deepest a canonical value nests lists and maps. Deeper is outside the
+/// domain, so walking a value never recurses past this.
+///
+/// A unit write is itself a value: its own object and its `fields` object
+/// spend two levels, so a field's value may nest 62 deep.
+const int maxNestingDepth = 64;
+
+/// Whether no bracket in [text] opens deeper than [limit], counting only
+/// brackets outside strings. [text] is UTF-8 bytes or UTF-16 code units: every
+/// structural character is ASCII, and no unit of a non-ASCII character is.
+///
+/// One pass, no recursion, so it can run on untrusted text before any decoder.
+bool nestsWithin(Iterable<int> text, int limit) {
+  var depth = 0;
+  var inString = false;
+  var escaped = false;
+  for (final c in text) {
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (c == 0x5C) {
+        escaped = true;
+      } else if (c == 0x22) {
+        inString = false;
+      }
+      continue;
+    }
+    switch (c) {
+      case 0x22:
+        inString = true;
+      case 0x7B || 0x5B:
+        if (++depth > limit) return false;
+      case 0x7D || 0x5D:
+        depth--;
+    }
+  }
+  return true;
+}
+
 /// [value]'s canonical text, or null when [value] is outside the domain.
 String? canonicalJsonOrNull(Object? value) {
   final out = StringBuffer();
-  return _write(value, out) ? out.toString() : null;
+  return _write(value, out, 0) ? out.toString() : null;
 }
 
 /// [value]'s canonical text. Throws an [ArgumentError] when [value] is outside
 /// the domain (a double, a lone surrogate, a non-string key, an integer past
-/// 2^53 − 1, or any other type).
+/// 2^53 − 1, nesting past [maxNestingDepth], or any other type).
 String canonicalJson(Object? value) =>
     canonicalJsonOrNull(value) ??
     (throw ArgumentError.value(
-        value, 'value', 'outside canonical JSON (no doubles, |n| ≤ 2^53 − 1)'));
+        value,
+        'value',
+        'outside canonical JSON (no doubles, |n| ≤ 2^53 − 1, no lone '
+            'surrogates, nesting ≤ $maxNestingDepth)'));
 
-bool _write(Object? value, StringBuffer out) {
+bool _write(Object? value, StringBuffer out, int depth) {
   switch (value) {
     case null:
       out.write('null');
@@ -38,20 +80,22 @@ bool _write(Object? value, StringBuffer out) {
     case String s:
       if (!_writeString(s, out)) return false;
     case List<Object?> list:
+      if (depth >= maxNestingDepth) return false;
       out.write('[');
       for (var i = 0; i < list.length; i++) {
         if (i > 0) out.write(',');
-        if (!_write(list[i], out)) return false;
+        if (!_write(list[i], out, depth + 1)) return false;
       }
       out.write(']');
     case Map<String, Object?> map:
+      if (depth >= maxNestingDepth) return false;
       final keys = map.keys.toList()..sort();
       out.write('{');
       for (var i = 0; i < keys.length; i++) {
         if (i > 0) out.write(',');
         if (!_writeString(keys[i], out)) return false;
         out.write(':');
-        if (!_write(map[keys[i]], out)) return false;
+        if (!_write(map[keys[i]], out, depth + 1)) return false;
       }
       out.write('}');
     default:

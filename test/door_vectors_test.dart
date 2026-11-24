@@ -92,6 +92,25 @@ final Map<String, (String, Refusal?)> _textVectors = {
     _bodyWith('{"n":[1,[true,null],{"a":"b"}],"tags":["x","y"]}'),
     null
   ),
+  // Nesting: the frame's own two levels plus the value's.
+  'nested to the bound': (_bodyWith('{"n":${'[' * 62}${']' * 62}}'), null),
+  'nested one past the bound': (
+    _bodyWith('{"n":${'[' * 63}${']' * 63}}'),
+    Refusal.tooDeep
+  ),
+  'two siblings each nested to the bound': (
+    _bodyWith('{"n":[${'[' * 61}${']' * 61},${'[' * 61}${']' * 61}]}'),
+    null
+  ),
+  'nested 20000 deep': (
+    _bodyWith('{"n":${'[' * 20000}${']' * 20000}}'),
+    Refusal.tooDeep
+  ),
+  'brackets inside a string do not nest': (_bodyText('"${'[{' * 100}"'), null),
+  'an escaped quote does not end the string': (
+    _bodyText('"${String.fromCharCode(0x5C)}"${'[' * 100}"'),
+    null
+  ),
   // Kills and saw.
   'sorted kills': (
     '{"fields":{},$_id,"kills":["$_a","$_b"],$_salt,"unit":"body","v":1}',
@@ -209,7 +228,11 @@ final Map<String, (List<int>, Refusal?)> _byteVectors = {
 
 /// What an admitted write parsed to, as text every platform must agree on.
 String _parsed(UnitWrite w) => [
-      w.runtimeType,
+      switch (w) {
+        ContentWrite() => 'content',
+        DeleteWrite() => 'delete',
+        RestoreWrite() => 'restore',
+      },
       w.record,
       w.identity.canonicalText,
       w.unit,
@@ -223,32 +246,40 @@ String _parsed(UnitWrite w) => [
 /// Every other platform must produce exactly these. Hashes, so that no tool
 /// can fold an escape in a golden into the character it names.
 const _expectedParsed = <String, String>{
-  r'0': '72b229db5d16ae4411994e4d95d8d39e8c5ec4b091a4b1ae3c7990279325a6b4',
+  r'0': '3cb93c7729cede86027c69cf634feca8fce9f23b40fa2e957f69decf787933f4',
   r'2^53 - 1':
-      'b4753b6903f713040f2594f2d0d79620f119d07ae81de23f34f5b9c8f0f0dd7b',
+      'aacba5ecb32f7088fbe9e809592959122a0ceec176e512e1b5c27b9d398bcce2',
   r'-(2^53 - 1)':
-      '1633a02e3779b49792ca4308ba61fc76b535274e9010cdadef3ab92fd5270800',
+      'c3eaad83dfd30cf2ddab916fc61d420c642ab2af7d8fa50e592c3cca325a5f47',
   r'non-BMP raw':
-      '15b644d0a9725731dc2826b5db7a5333894e39783eb8bcea5840b4c7893c04df',
+      '8bd3fe6096dee511d6e0df22965b51edd36bb8fe9491b708883b200063bb2934',
   r'U+2028 raw':
-      '0b4fa6ffd8f3cf043a1a307aad6c73431072db8e096a9bfef2964186a6fc0a09',
+      '5f3609c1319c85b7f2ea1ac81566b88f2c10f967085baa69577c987e2792b7c9',
   r'\n \t \b \f \r \" \\':
-      '45995956cd78c55d50dac323ba5bd722462c5dab73a286ab1043a8445d75f31b',
-  r'\u001f': 'b44741b721e493272207b5e3cc92793fe95035dd233d9a8c22965069d0f2301b',
+      '4b825bcceefad25e80529a99965a54d29f7add0b38f5f973093386d309a86b3e',
+  r'\u001f': '5372966166d51934e9d57a14f081a44bfab88bb39cc5de4bb9cd234c8f221997',
   r'raw DEL':
-      'd867c71449451958f14ff02b67cc2007919445b8b9edad93102c33b3278ac04c',
+      '13f650a91427d0a15463b5b1ad827da6c37a0b4f9214dfa8c743c6574f545db1',
   r'nested list and map':
-      '7068b4e83aba20c31f79dd111892e988b62bae6126d81474b488d5506cd5dd7d',
+      '5bb8cec85ce648da84e1ddb9ca5dcf5cc7345084c51aab60dcc4addcaf6bd754',
+  r'nested to the bound':
+      'c8827c49a85b59723fa33ac6ac06341eb0c5e654ce8877c074837c9805d57db4',
+  r'two siblings each nested to the bound':
+      '2a0809ab43e47acd30adab6bd6a6c8e85d38b45ea5602a37f60e232cf14ee0e4',
+  r'brackets inside a string do not nest':
+      '872b9c9beeed486bb86d81bb0b29392570d441e53e6c5d3e52345863430908e0',
+  r'an escaped quote does not end the string':
+      '4d14f89eda980b3e5642ced01b8e22bef8ff6d61d68081f7bae8f7968e9c686c',
   r'sorted kills':
-      'bfab35f891482a040070ec919b2ae02227b16f5701cfca43ac39e0dcc055e4d5',
+      '16e0bb389d037442056f12496bb74f34a4695761ba8c940f342eff2ccf5b4551',
   r'delete with sorted saw':
-      '27b122cc215f1d6d3c9f517dd7bdbe08dee6768bc6103dedf786dacea2d3e996',
+      '655ff3c3a1d629a1a70c36f604aa2b5f28ae7da4e3c0b24d85a950946126d60c',
   r'delete with empty saw':
-      '2328f714ac1e81134f11de61f700c2420677c1da64fcd567073d860b1193d23a',
+      '5c89b4eebf415bff30a0a49886247e1efe8cf7663a48222b1baa531dcd18c969',
   r'restore':
-      '972a3a85bf408ae4012f7315001baa0f6a4e013ed4e12c71066aa93d4a0d717b',
+      'e1ef10fcc54b2f216f8c01e1146d636831c63f27e24f873e1d4b1a1337679b8d',
   r'deterministic birth':
-      'e266d9c8f8c8fb8b3a1a78e45a8723dc20476694cc8f18ef01aeee416f690065',
+      '2c9004ccb6ecade71293c492efedff6adce50c694720f3cd5fd425a5f7f1c5f1',
 };
 
 const _dump = false;

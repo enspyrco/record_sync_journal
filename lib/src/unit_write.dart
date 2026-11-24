@@ -112,8 +112,12 @@ final class RestoreWrite extends UnitWrite {
 /// The factories cover the four writes there are, so a malformed one (a `saw`
 /// on an edit, an unsalted edit that kills) cannot be asked for.
 final class UnitWriteDraft {
-  UnitWriteDraft._(
-      this.identity, this.unit, this.fields, this.kills, this.saw, this.salted);
+  /// Copies [kills] and [saw], so what the author saw is fixed when the draft
+  /// is made, whatever the caller does to its sets afterwards.
+  UnitWriteDraft._(this.identity, this.unit, this.fields, Set<WriteId> kills,
+      Set<WriteId>? saw, this.salted)
+      : kills = Set.unmodifiable(kills),
+        saw = saw == null ? null : Set.unmodifiable(saw);
 
   /// A salted write of [unit]'s whole field set. [observedLive] is the unit's
   /// live set when the operation was computed, never when it is appended.
@@ -127,7 +131,7 @@ final class UnitWriteDraft {
       throw ArgumentError.value(unit, 'unit', 'use delete or restore');
     }
     return UnitWriteDraft._(
-        identity, unit, CanonicalObject.of(fields), observedLive, null, true);
+        identity, unit, _unitFields(fields), observedLive, null, true);
   }
 
   /// A delete. [observedLiveTomb] is `_tomb`'s live set, which it kills;
@@ -161,7 +165,20 @@ final class UnitWriteDraft {
       throw ArgumentError.value(unit, 'unit', 'a birth is a content write');
     }
     return UnitWriteDraft._(
-        identity, unit, CanonicalObject.of(fields), const {}, null, false);
+        identity, unit, _unitFields(fields), const {}, null, false);
+  }
+
+  /// [fields] as a unit's field set. In a write, the write object and its
+  /// `fields` object take two of [maxNestingDepth]'s levels, so a field value
+  /// nests at most 62 deep; deeper is refused here, where the author asked for
+  /// it, rather than by the door at write time.
+  static CanonicalObject _unitFields(Map<String, Object?> fields) {
+    final value = CanonicalObject.of(fields);
+    if (!nestsWithin(value.text.codeUnits, maxNestingDepth - 1)) {
+      throw ArgumentError.value(fields, 'fields',
+          'nests deeper than a write allows (${maxNestingDepth - 2} levels)');
+    }
+    return value;
   }
 
   static CanonicalObject _tombFields(bool deleted) =>
@@ -231,6 +248,9 @@ enum Refusal {
 
   /// A write to a write-once unit that kills something.
   writeOnce,
+
+  /// Brackets nested deeper than [maxNestingDepth].
+  tooDeep,
 }
 
 /// What the door made of a frame.
@@ -264,6 +284,9 @@ final class Door {
   static Map<String, IdentityFamily> _byName(Iterable<IdentityFamily> fs) {
     final byName = <String, IdentityFamily>{};
     for (final f in fs) {
+      if (f.name.isEmpty) {
+        throw ArgumentError.value(f.name, 'families', 'a family has a name');
+      }
       if (byName.containsKey(f.name)) {
         throw ArgumentError.value(f.name, 'families', 'named twice');
       }
@@ -286,11 +309,19 @@ final class Door {
   static const _required = {'v', 'identity', 'unit', 'fields', 'kills'};
 
   /// The record [identity] names, or null when no family here reads it.
-  ResolvedIdentity? resolve(Identity identity) =>
-      _families[identity.family]?.resolve(identity);
+  ResolvedIdentity? resolve(Identity identity) {
+    final family = _families[identity.family];
+    final read = family?.resolve(identity);
+    if (family == null || read == null) return null;
+    final id = RecordId.parse(family: family.name, key: read.key);
+    return id == null ? null : (id: id, schema: read.schema);
+  }
 
-  /// Admits [frame] or says why not. In order: hash before any decode; strict
-  /// UTF-8; JSON; the canonical re-encode test; then the exact schema.
+  /// Admits [frame] or says why not. In order: hash before any decode; the
+  /// first byte is `{`; bracket depth, counted over the bytes before any
+  /// decoder can recurse; strict UTF-8; JSON; the canonical re-encode test;
+  /// then the exact schema. The depth count must stay ahead of decoding: a
+  /// deep frame crashes or hangs the decoder on some platforms.
   ///
   /// The canonical test comes before the schema so that the schema only ever
   /// sees a parsed value that is a function of the text: from there on no
@@ -301,6 +332,7 @@ final class Door {
     Refused refuse(Refusal r) => Refused(id, r);
 
     if (bytes.isEmpty || bytes[0] != 0x7B) return refuse(Refusal.notAnObject);
+    if (!nestsWithin(bytes, maxNestingDepth)) return refuse(Refusal.tooDeep);
     final String text;
     try {
       text = const Utf8Decoder(allowMalformed: false).convert(bytes);
@@ -352,7 +384,7 @@ final class Door {
     if (identity == null) return refuse(Refusal.schema);
     final family = _families[identity.family];
     if (family == null) return refuse(Refusal.unknownFamily);
-    final resolved = family.resolve(identity);
+    final resolved = resolve(identity);
     if (resolved == null) return refuse(Refusal.invalidIdentity);
     final schema = resolved.schema;
 
@@ -399,7 +431,8 @@ final class Door {
     final unit = UnitName.parse(unitWire);
     final declared = unit == null ? null : schema.units[unit];
     if (unit == null || declared == null) return refuse(Refusal.unknownUnit);
-    if (!declared.containsAll(fieldsWire.keys)) return refuse(Refusal.fields);
+    final names = {for (final k in fieldsWire.keys) FieldName.parse(k)};
+    if (!declared.containsAll(names)) return refuse(Refusal.fields);
     if (salt == null &&
         (kills.isNotEmpty || !family.allowsDeterministicBirth)) {
       return refuse(Refusal.salt);

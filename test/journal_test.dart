@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -7,12 +8,10 @@ import 'package:test/test.dart';
 import 'fixtures/mint.dart';
 import 'fixtures/notes.dart';
 
-RecordJournal _journal(JournalStore store, {int seed = 1, Serializer? lock}) =>
-    RecordJournal(
-        store: store,
-        families: [noteFamily, derivedNoteFamily],
-        random: Random(seed),
-        serialize: lock);
+RecordJournal _journal(JournalStore store, {int seed = 1}) => RecordJournal(
+    store: store,
+    families: [noteFamily, derivedNoteFamily],
+    random: Random(seed));
 
 Future<String> _snapshot(RecordJournal j) async =>
     (await j.readAll()).map(describe).join('\n\n');
@@ -99,8 +98,9 @@ void main() {
           identity: a, unit: body, fields: {'text': 'x'}, observedLive: {}),
     ]);
     final [sent] = await alice.unsent();
-    expect(await bob.absorb(sent.bytes), isA<Admitted>());
-    expect(await bob.absorb(sent.bytes), isA<Admitted>());
+    expect(await bob.absorb(sent.bytes), isA<Appended>());
+    expect(await bob.absorb(sent.bytes), isA<AlreadyHeld>(),
+        reason: 'a re-delivered frame must not read as a change');
     expect(await _snapshot(bob), await _snapshot(alice));
     expect(await bob.unsent(), isEmpty, reason: 'absorbed writes are not sent');
   });
@@ -108,7 +108,7 @@ void main() {
   test('a refused frame changes nothing', () async {
     final j = _journal(InMemoryJournalStore());
     final r = await j.absorb(Uint8List.fromList('{"v":1}'.codeUnits));
-    expect(r, isA<Refused>());
+    expect(r, isA<NotAdmitted>());
     expect(await j.readAll(), isEmpty);
   });
 
@@ -195,29 +195,59 @@ void main() {
     await expectLater(j.markAcked(4), throwsArgumentError);
   });
 
-  test('every mutation goes through the given serializer', () async {
-    var calls = 0;
-    final queue = isolateLocalQueue();
-    Future<T> counting<T>(Future<T> Function() op) {
-      calls++;
-      return queue(op);
+  test('a read overlapping a write never loses the write', () async {
+    final j = _journal(InMemoryJournalStore());
+    UnitWriteDraft d(String n) => UnitWriteDraft.content(
+        identity: note(n), unit: body, fields: {'text': n}, observedLive: {});
+    for (var i = 0; i < 20; i++) {
+      await j.write([d('seed$i')]);
     }
+    final writing = j.write([d('new')]);
+    final reading = j.readAll();
+    await Future.wait([writing, reading]);
+    final [w] = await writing;
+    expect(await j.readAll(), hasLength(21));
+    expect([for (final e in await j.unsent()) WriteId.ofBytes(e.bytes)],
+        contains(w));
+  });
 
-    final j = _journal(InMemoryJournalStore(), lock: counting);
+  test('a store holding a lock that is not reentrant never deadlocks',
+      () async {
+    // The shape a cross-tab store takes: one non-reentrant lock, taken inside
+    // transaction(). Every journal operation must get through it.
+    final store = _LockedStore();
+    final j = _journal(store);
     await j.write([
       UnitWriteDraft.content(
           identity: a, unit: body, fields: {'text': 'x'}, observedLive: {}),
     ]);
     await j.absorb((await j.unsent()).single.bytes);
+    await j.read(aId);
+    await j.readAll();
     await j.recompute();
     await j.markAcked(1);
-    expect(calls, 4);
+    expect(store.held, isFalse);
+    expect(store.taken, greaterThanOrEqualTo(7));
   });
 
   test('the queue survives a failed operation', () async {
     final q = isolateLocalQueue();
     await expectLater(q(() async => throw StateError('x')), throwsStateError);
     expect(await q(() async => 1), 1);
+  });
+
+  test('a failure nobody awaits still reaches the zone', () async {
+    final unhandled = <Object>[];
+    final done = Completer<void>();
+    // zone-ok: an unhandled async error is only observable through a zone.
+    runZonedGuarded(() {
+      final q = isolateLocalQueue();
+      unawaited(q<void>(() async => throw StateError('dropped')));
+      q(() async => done.complete());
+    }, (error, _) => unhandled.add(error));
+    await done.future;
+    await Future<void>.delayed(Duration.zero);
+    expect(unhandled, [isA<StateError>()]);
   });
 }
 
@@ -266,4 +296,26 @@ final class _Failing implements JournalTransaction {
   Future<List<RecordId>> projectedRecords() => _txn.projectedRecords();
   @override
   Future<void> clearProjection() => _txn.clearProjection();
+}
+
+/// An in-memory store that takes a lock which is not reentrant, as a web
+/// store's navigator.locks is, around every transaction.
+final class _LockedStore implements JournalStore {
+  final _inner = InMemoryJournalStore();
+  final _lock = isolateLocalQueue();
+  bool held = false;
+  int taken = 0;
+
+  @override
+  Future<T> transaction<T>(Future<T> Function(JournalTransaction txn) body) =>
+      _lock(() async {
+        if (held) throw StateError('lock taken twice');
+        held = true;
+        taken++;
+        try {
+          return await _inner.transaction(body);
+        } finally {
+          held = false;
+        }
+      });
 }

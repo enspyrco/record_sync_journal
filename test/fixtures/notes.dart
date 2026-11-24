@@ -1,9 +1,12 @@
 import 'package:record_sync_journal/record_sync_journal.dart';
 
+Set<FieldName> fieldNames(List<String> names) =>
+    {for (final n in names) FieldName.of(n)};
+
 /// A minimal app: one record type with a body unit and a title unit.
 final noteSchema = RecordSchema(type: 'note', units: {
-  'body': ['text', 'n', 'tags'],
-  'title': ['title'],
+  body: fieldNames(['text', 'n', 'tags']),
+  title: fieldNames(['title']),
 });
 
 final noteFamily =
