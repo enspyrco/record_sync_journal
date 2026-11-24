@@ -226,8 +226,12 @@ enum Refusal {
   /// The parsed value does not re-encode to exactly the decoded text.
   notCanonical,
 
-  /// A key missing or extra, a value of the wrong type, or `v` not 1.
+  /// `v` missing or not an integer, or a v=1 write with a key missing or
+  /// extra, or a value of the wrong type.
   schema,
+
+  /// `v` is an integer other than 1: a wire this build doesn't know.
+  unknownVersion,
 
   /// `kills` or `saw` holds an entry that is not a write id, or is not sorted
   /// and unique.
@@ -250,7 +254,27 @@ enum Refusal {
   writeOnce,
 
   /// Brackets nested deeper than [maxNestingDepth].
-  tooDeep,
+  tooDeep;
+
+  /// A refusal a newer build's write can cause in this one. Apps may only add
+  /// families and units, and every wire keeps an integer `v`, so these three
+  /// are the only ones (schema-evolution DESIGN §1, §2).
+  bool get isNewerSchema => switch (this) {
+        unknownFamily || unknownUnit || unknownVersion => true,
+        notAnObject ||
+        malformedUtf8 ||
+        notJson ||
+        notCanonical ||
+        schema ||
+        writeIds ||
+        saw ||
+        salt ||
+        invalidIdentity ||
+        fields ||
+        writeOnce ||
+        tooDeep =>
+          false,
+      };
 }
 
 /// What the door made of a frame.
@@ -346,6 +370,11 @@ final class Door {
     }
     final wire = JsonObject.parse(parsed);
     if (wire == null) return refuse(Refusal.schema);
+    // `v` is read before any v=1 rule, so a later wire with other keys is
+    // refused as a newer version, not as malformed.
+    final v = wire.raw('v');
+    if (v is! int) return refuse(Refusal.schema);
+    if (v != 1) return refuse(Refusal.unknownVersion);
     final keys = wire.keys.toSet();
     if (!_keys.containsAll(keys) || !keys.containsAll(_required)) {
       return refuse(Refusal.schema);
@@ -353,9 +382,7 @@ final class Door {
 
     final identityWire = JsonObject.parse(wire.raw('identity'));
     final fieldsWire = JsonObject.parse(wire.raw('fields'));
-    final (v, unitWire, killsWire) =
-        (wire.raw('v'), wire.raw('unit'), wire.raw('kills'));
-    if (v is! int || v != 1) return refuse(Refusal.schema);
+    final (unitWire, killsWire) = (wire.raw('unit'), wire.raw('kills'));
     if (identityWire == null ||
         unitWire is! String ||
         fieldsWire == null ||

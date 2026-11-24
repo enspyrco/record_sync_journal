@@ -39,4 +39,15 @@ export 'src/values.dart'
         UnitName,
         WriteId;
 export 'src/view.dart'
-    show DrawnRecord, GhostRecord, HiddenRecord, RecordView, UnitState;
+    show
+        DrawnRecord,
+        GhostRecord,
+        HiddenRecord,
+        IntactRecordRead,
+        Readable,
+        RecordRead,
+        RecordView,
+        UnitState,
+        UnreadableRecord,
+        UnreadRecord,
+        UnreadWrite;

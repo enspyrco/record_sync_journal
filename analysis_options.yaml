@@ -2,6 +2,9 @@ include: package:lints/recommended.yaml
 
 # Strict: an implicit `dynamic` is an error, not a silence.
 analyzer:
+  # Design docs keep frozen copies of lib/src, which don't resolve from there.
+  exclude:
+    - docs/**
   language:
     strict-casts: true
     strict-inference: true

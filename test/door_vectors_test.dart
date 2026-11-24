@@ -51,8 +51,31 @@ final Map<String, (String, Refusal?)> _textVectors = {
     '{"fields":{},$_id,"kills":[],$_salt,"unit":"body","v":1.0}',
     Refusal.notCanonical
   ),
+  // `v` is read before the v=1 grammar: any other integer is a newer wire,
+  // whatever its keys; only a missing or non-integer `v` is malformed.
   '"v":2': (
     '{"fields":{},$_id,"kills":[],$_salt,"unit":"body","v":2}',
+    Refusal.unknownVersion
+  ),
+  '"v":2 with a key v=1 lacks': (
+    '{"extra":1,"fields":{},$_id,"kills":[],$_salt,"unit":"body","v":2}',
+    Refusal.unknownVersion
+  ),
+  '"v":2 with v=1 keys missing': ('{"v":2}', Refusal.unknownVersion),
+  '"v":0': (
+    '{"fields":{},$_id,"kills":[],$_salt,"unit":"body","v":0}',
+    Refusal.unknownVersion
+  ),
+  'no v': (
+    '{"fields":{},$_id,"kills":[],$_salt,"unit":"body"}',
+    Refusal.schema
+  ),
+  '"v":"1"': (
+    '{"fields":{},$_id,"kills":[],$_salt,"unit":"body","v":"1"}',
+    Refusal.schema
+  ),
+  '"v":true': (
+    '{"fields":{},$_id,"kills":[],$_salt,"unit":"body","v":true}',
     Refusal.schema
   ),
   // Strings.

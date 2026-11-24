@@ -6,6 +6,7 @@ import 'package:record_sync_journal/record_sync_journal.dart';
 import 'package:test/test.dart';
 
 import 'fixtures/engram.dart';
+import 'fixtures/mint.dart';
 
 RecordJournal _device(int seed) => RecordJournal(
     store: InMemoryJournalStore(),
@@ -78,7 +79,7 @@ void main() {
         UnitWriteDraft.content(
             identity: id, unit: _u(unit), fields: fields, observedLive: {}),
     ]);
-    final views = await j.readAll();
+    final views = await viewsOf(j);
     expect({for (final v in views) v.schema.type.value},
         {'concept', 'relationship', 'quizItem', 'review', 'document', 'topic'});
     expect(views.every((v) => v is DrawnRecord), isTrue);
@@ -169,7 +170,7 @@ void main() {
     await j.write([
       UnitWriteDraft.restore(identity: link, observedLiveTomb: {}),
     ]);
-    final born = (await j.read(_id(link)))!;
+    final born = (await viewOf(j, _id(link)))!;
     expect(born, isA<DrawnRecord>());
     await j.write([
       UnitWriteDraft.delete(
@@ -177,7 +178,7 @@ void main() {
           observedLiveTomb: born.tomb!.liveIds,
           sawContent: born.liveContentIds),
     ]);
-    expect(await j.read(_id(link)), isA<HiddenRecord>());
+    expect(await viewOf(j, _id(link)), isA<HiddenRecord>());
   });
 
   test('two devices adding one document to one topic do not race', () async {
@@ -190,7 +191,7 @@ void main() {
           [UnitWriteDraft.restore(identity: link, observedLiveTomb: {})]);
     }
     await alice.absorb((await bob.unsent()).single.bytes);
-    final v = (await alice.read(_id(link)))!;
+    final v = (await viewOf(alice, _id(link)))!;
     expect(v.tomb!.live, hasLength(2));
     expect(v.tomb!.contested, isFalse);
   });
@@ -208,7 +209,7 @@ void main() {
       UnitWriteDraft.content(
           identity: rv, unit: _u('event'), fields: fields, observedLive: {}),
     ]);
-    final seen = (await j.read(_id(rv)))!.units[_u('event')]!.liveIds;
+    final seen = (await viewOf(j, _id(rv)))!.units[_u('event')]!.liveIds;
     await expectLater(
         j.write([
           UnitWriteDraft.content(
@@ -241,7 +242,7 @@ void main() {
     ]);
     expect(a, b);
     await alice.absorb((await bob.unsent()).single.bytes);
-    final v = (await alice.read(_id(again)))!;
+    final v = (await viewOf(alice, _id(again)))!;
     expect(v.units[_u('event')]!.live, hasLength(1), reason: 'one lapse');
   });
 
@@ -281,7 +282,7 @@ void main() {
           observedLive: {}),
     ]);
     await alice.absorb((await bob.unsent()).single.bytes);
-    final s = (await alice.read(_id(q)))!.units[_u('predicted')]!;
+    final s = (await viewOf(alice, _id(q)))!.units[_u('predicted')]!;
     expect(s.contested, isTrue);
     // The package never picks; engram's fold reads the integers and takes the
     // max, so a harder prior shows the card sooner.

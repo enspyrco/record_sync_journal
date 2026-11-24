@@ -42,12 +42,19 @@ final class UnitState {
 /// One record over its admitted writes: every unit's state, and whether the
 /// record is drawn, hidden or a ghost (DESIGN §3.6.5, D1).
 sealed class RecordView {
-  RecordView._(this.id, this.identity, this.schema, this.units);
+  RecordView._(_Args a)
+      : id = a.$1,
+        identity = a.$2,
+        schema = a.$3,
+        units = a.$4,
+        unread = a.$5;
 
-  /// The view of [writes], all of one record. Throws an [ArgumentError] when
+  /// The view of [writes], all of one record, with [unread] the record's
+  /// stored writes this build left out. Throws an [ArgumentError] when
   /// [writes] is empty or spans records. Order and duplicates make no
   /// difference.
-  factory RecordView.of(Iterable<UnitWrite> writes) {
+  factory RecordView.of(Iterable<UnitWrite> writes,
+      {Iterable<UnreadWrite> unread = const []}) {
     final byUnit = <UnitName, List<UnitWrite>>{};
     UnitWrite? first;
     for (final w in writes) {
@@ -76,7 +83,8 @@ sealed class RecordView {
       first.record,
       first.identity,
       first.schema,
-      Map<UnitName, UnitState>.unmodifiable(units)
+      Map<UnitName, UnitState>.unmodifiable(units),
+      Set<UnreadWrite>.unmodifiable(unread),
     );
     if (!deleted.contains(true)) return DrawnRecord._(args);
 
@@ -102,6 +110,11 @@ sealed class RecordView {
   /// Each unit that has any admitted write, `_tomb` included.
   final Map<UnitName, UnitState> units;
 
+  /// Stored writes of this record that a newer build wrote and this one can't
+  /// read. They are in no unit, so no `kills` or `saw` computed here names
+  /// them. Non-empty means this view is partial.
+  final Set<UnreadWrite> unread;
+
   /// `_tomb`'s state, or null when the record has never been deleted or
   /// restored.
   UnitState? get tomb => units[UnitName.tomb];
@@ -125,19 +138,18 @@ sealed class RecordView {
 
 /// Not deleted: no `_tomb` write, or `_tomb` is false.
 final class DrawnRecord extends RecordView {
-  DrawnRecord._(_Args a) : super._(a.$1, a.$2, a.$3, a.$4);
+  DrawnRecord._(super.a) : super._();
 }
 
 /// Deleted, and the live deletes together saw every live content write.
 final class HiddenRecord extends RecordView {
-  HiddenRecord._(_Args a) : super._(a.$1, a.$2, a.$3, a.$4);
+  HiddenRecord._(super.a) : super._();
 }
 
 /// Deleted, with a question to list: content no live delete saw, or a `_tomb`
 /// that is itself contested. Restore or Delete settles it.
 final class GhostRecord extends RecordView {
-  GhostRecord._(_Args a, this.unseen, this.tombContested)
-      : super._(a.$1, a.$2, a.$3, a.$4);
+  GhostRecord._(super.a, this.unseen, this.tombContested) : super._();
 
   /// Live content writes no live delete names in its `saw`.
   final Set<WriteId> unseen;
@@ -146,4 +158,84 @@ final class GhostRecord extends RecordView {
   final bool tombContested;
 }
 
-typedef _Args = (RecordId, Identity, RecordSchema, Map<UnitName, UnitState>);
+typedef _Args = (
+  RecordId,
+  Identity,
+  RecordSchema,
+  Map<UnitName, UnitState>,
+  Set<UnreadWrite>,
+);
+
+/// A stored write this build can't read, because a newer build wrote it.
+///
+/// It keeps its write id to itself: [UnitWriteDraft] takes [WriteId]s, so a
+/// write nobody here read can never be named in a `kills` or `saw`.
+final class UnreadWrite {
+  UnreadWrite._(this._id, this.reason);
+
+  /// The write [refused] names. Throws an [ArgumentError] unless its reason
+  /// [Refusal.isNewerSchema].
+  factory UnreadWrite.of(Refused refused) {
+    if (!refused.reason.isNewerSchema) {
+      throw ArgumentError.value(refused, 'refused', 'not a newer schema');
+    }
+    return UnreadWrite._(refused.id, refused.reason);
+  }
+
+  final WriteId _id;
+
+  /// Which part of the write this build doesn't know.
+  final Refusal reason;
+
+  @override
+  bool operator ==(Object other) => other is UnreadWrite && other._id == _id;
+
+  @override
+  int get hashCode => _id.hashCode;
+
+  @override
+  String toString() => 'UnreadWrite($reason)';
+}
+
+/// What reading one stored record found.
+sealed class RecordRead {
+  const RecordRead();
+
+  RecordId get id;
+}
+
+/// A record whose stored writes this build either read or, being newer, left
+/// out: what `RecordJournal.read` returns.
+sealed class IntactRecordRead extends RecordRead {
+  const IntactRecordRead();
+}
+
+/// At least one stored write was read. [RecordView.unread] holds the rest.
+final class Readable extends IntactRecordRead {
+  const Readable(this.view);
+  final RecordView view;
+
+  @override
+  RecordId get id => view.id;
+}
+
+/// The record is stored, and every write of it was written by a newer build.
+/// It is not absent: an editor must not create it again.
+final class UnreadRecord extends IntactRecordRead {
+  UnreadRecord(this.id, Iterable<UnreadWrite> unread)
+      : unread = Set.unmodifiable(unread);
+
+  @override
+  final RecordId id;
+  final Set<UnreadWrite> unread;
+}
+
+/// A stored write of the record is refused for a reason no newer build can
+/// cause: the freeze was broken or the store is corrupt.
+final class UnreadableRecord extends RecordRead {
+  const UnreadableRecord(this.id, this.reason);
+
+  @override
+  final RecordId id;
+  final Refusal reason;
+}

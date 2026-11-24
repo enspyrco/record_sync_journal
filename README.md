@@ -45,7 +45,11 @@ record type so codraw and engram share one implementation.
 final journal = RecordJournal(store: InMemoryJournalStore(), families: [noteFamily]);
 
 // Capture what the person saw when the gesture began, not at append.
-final seen = (await journal.read(id))?.units[body]?.liveIds ?? {};
+final seen = switch (await journal.read(id)) {
+  null => <WriteId>{},                        // nothing stored: a birth
+  Readable(:final view) => view.units[body]?.liveIds ?? {},
+  UnreadRecord() => throw StateError('written by a newer version'),
+};
 await journal.write([
   UnitWriteDraft.content(
       identity: note, unit: body, fields: {'text': 'hi'}, observedLive: seen),
@@ -55,6 +59,32 @@ await journal.write([
 for (final e in await journal.unsent()) send(e.bytes);
 await journal.absorb(received);
 ```
+
+## Two app versions over one store
+
+A newer build may add families, and units to an existing record type, but must
+never change a shipped unit: its field set, a field's encoding, its write-once
+bit, or a family's name, identity fields, key or `resolve`. Never rename or
+reuse a name; deprecate it instead.
+
+Under that rule, a write an older build can't read is refused as
+`unknownFamily`, `unknownUnit` or `unknownVersion` (`Refusal.isNewerSchema`),
+and reads leave it out and say so:
+
+- `read` returns `Readable(view)`, with the left-out writes in `view.unread`;
+  `UnreadRecord` when every stored write was left out, which is not absence, so
+  don't create the record again; or null when nothing is stored.
+- An `UnreadWrite` keeps its id to itself, so no `kills` or `saw` can name a
+  write this build never read.
+- Any other refusal of a stored write means the rule was broken or the store is
+  corrupt: `read` throws a `StateError`, and `readAll` returns that record as
+  `UnreadableRecord` so it can't hide the rest.
+- `recompute` stays strict and throws on any refusal, so an older tab can never
+  rebuild a newer tab's writes away.
+- An older build's `absorb` refuses a newer frame and stores nothing. After an
+  upgrade, the app's transport reads every write again from the start, so
+  what it refused while it was older arrives now
+  (`docs/design/schema-evolution/DESIGN.md` §3).
 
 ## Reading is not free: cache views above the journal
 

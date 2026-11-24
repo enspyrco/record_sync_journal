@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'journal_store.dart';
 import 'unit_write.dart';
@@ -78,22 +79,31 @@ final class RecordJournal {
     }
   }
 
-  /// [record]'s view, or null when no write names it. The transaction only
-  /// copies bytes; the door reads them after it ends, so a read never holds
-  /// writers back while it parses.
-  Future<RecordView?> read(RecordId record) async {
+  /// What is stored for [record], or null only when nothing is. Writes a
+  /// newer build made are left out and listed as unread; any other refusal
+  /// of a stored write throws a [StateError].
+  ///
+  /// The transaction only copies bytes; the door reads them after it ends, so
+  /// a read never holds writers back while it parses.
+  Future<IntactRecordRead?> read(RecordId record) async {
     final bytes = await _store.transaction((txn) => txn.projected(record));
-    return bytes.isEmpty ? null : RecordView.of(bytes.map(_readmit));
+    if (bytes.isEmpty) return null;
+    return switch (_readRecord(record, bytes)) {
+      IntactRecordRead read => read,
+      UnreadableRecord(:final reason) =>
+        throw StateError('a stored write of $record is refused: $reason'),
+    };
   }
 
-  /// Every record's view, ordered by id. Bytes are copied in one transaction
-  /// and read after it ends.
-  Future<List<RecordView>> readAll() async {
+  /// Every stored record, ordered by id. A record with a corrupt write is an
+  /// [UnreadableRecord] rather than a throw, so it can't hide the rest. Bytes
+  /// are copied in one transaction and read after it ends.
+  Future<List<RecordRead>> readAll() async {
     final byRecord = await _store.transaction((txn) async {
       final ids = [...await txn.projectedRecords()]..sort();
-      return [for (final id in ids) await txn.projected(id)];
+      return [for (final id in ids) (id, await txn.projected(id))];
     });
-    return [for (final bytes in byRecord) RecordView.of(bytes.map(_readmit))];
+    return [for (final (id, bytes) in byRecord) _readRecord(id, bytes)];
   }
 
   /// Rebuilds the projection from the log alone. It must equal the projection
@@ -134,8 +144,32 @@ final class RecordJournal {
     return true;
   }
 
-  /// Bytes from the store were admitted once by this door; a refusal now means
-  /// the families changed under the store, which no view can paper over.
+  /// [record]'s stored [bytes], which are not empty, read through the door.
+  /// When several writes are refused for reasons no newer build causes, the
+  /// one with the smallest id names the reason, so every device reports alike.
+  RecordRead _readRecord(RecordId record, List<Uint8List> bytes) {
+    final writes = <UnitWrite>[];
+    final unread = <UnreadWrite>[];
+    Refused? broken;
+    for (final b in bytes) {
+      switch (door.admit(b)) {
+        case Admitted(:final write):
+          writes.add(write);
+        case Refused refused when refused.reason.isNewerSchema:
+          unread.add(UnreadWrite.of(refused));
+        case Refused refused:
+          if (broken == null || refused.id.compareTo(broken.id) < 0) {
+            broken = refused;
+          }
+      }
+    }
+    if (broken != null) return UnreadableRecord(record, broken.reason);
+    if (writes.isEmpty) return UnreadRecord(record, unread);
+    return Readable(RecordView.of(writes, unread: unread));
+  }
+
+  /// For [recompute], which stays strict: every stored write must be read, so
+  /// an older build can never rebuild a newer build's writes away.
   UnitWrite _readmit(List<int> bytes) => switch (door.admit(bytes)) {
         Admitted(:final write) => write,
         Refused(:final reason, :final id) =>
