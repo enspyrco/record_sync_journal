@@ -131,7 +131,7 @@ final class UnitWriteDraft {
       throw ArgumentError.value(unit, 'unit', 'use delete or restore');
     }
     return UnitWriteDraft._(
-        identity, unit, CanonicalObject.of(fields), observedLive, null, true);
+        identity, unit, _unitFields(fields), observedLive, null, true);
   }
 
   /// A delete. [observedLiveTomb] is `_tomb`'s live set, which it kills;
@@ -165,7 +165,20 @@ final class UnitWriteDraft {
       throw ArgumentError.value(unit, 'unit', 'a birth is a content write');
     }
     return UnitWriteDraft._(
-        identity, unit, CanonicalObject.of(fields), const {}, null, false);
+        identity, unit, _unitFields(fields), const {}, null, false);
+  }
+
+  /// [fields] as a unit's field set. In a write, the write object and its
+  /// `fields` object take two of [maxNestingDepth]'s levels, so a field value
+  /// nests at most 62 deep; deeper is refused here, where the author asked for
+  /// it, rather than by the door at write time.
+  static CanonicalObject _unitFields(Map<String, Object?> fields) {
+    final value = CanonicalObject.of(fields);
+    if (!nestsWithin(value.text.codeUnits, maxNestingDepth - 1)) {
+      throw ArgumentError.value(fields, 'fields',
+          'nests deeper than a write allows (${maxNestingDepth - 2} levels)');
+    }
+    return value;
   }
 
   static CanonicalObject _tombFields(bool deleted) =>
@@ -304,8 +317,11 @@ final class Door {
     return id == null ? null : (id: id, schema: read.schema);
   }
 
-  /// Admits [frame] or says why not. In order: hash before any decode; strict
-  /// UTF-8; JSON; the canonical re-encode test; then the exact schema.
+  /// Admits [frame] or says why not. In order: hash before any decode; the
+  /// first byte is `{`; bracket depth, counted over the bytes before any
+  /// decoder can recurse; strict UTF-8; JSON; the canonical re-encode test;
+  /// then the exact schema. The depth count must stay ahead of decoding: a
+  /// deep frame crashes or hangs the decoder on some platforms.
   ///
   /// The canonical test comes before the schema so that the schema only ever
   /// sees a parsed value that is a function of the text: from there on no

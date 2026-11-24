@@ -60,7 +60,10 @@ String? canonicalJsonOrNull(Object? value) {
 String canonicalJson(Object? value) =>
     canonicalJsonOrNull(value) ??
     (throw ArgumentError.value(
-        value, 'value', 'outside canonical JSON (no doubles, |n| ≤ 2^53 − 1)'));
+        value,
+        'value',
+        'outside canonical JSON (no doubles, |n| ≤ 2^53 − 1, no lone '
+            'surrogates, nesting ≤ $maxNestingDepth)'));
 
 bool _write(Object? value, StringBuffer out, int depth) {
   switch (value) {

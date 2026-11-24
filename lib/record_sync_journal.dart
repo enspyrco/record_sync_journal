@@ -6,7 +6,8 @@ export 'src/canonical_json.dart'
     show canonicalJson, canonicalJsonOrNull, maxNestingDepth, maxSafeInteger;
 export 'src/journal_store.dart'
     show InMemoryJournalStore, JournalEntry, JournalStore, JournalTransaction;
-export 'src/record_journal.dart' show RecordJournal;
+export 'src/record_journal.dart'
+    show Absorption, AlreadyHeld, Appended, NotAdmitted, RecordJournal;
 export 'src/serializer.dart' show Serializer, isolateLocalQueue;
 export 'src/unit_write.dart'
     show

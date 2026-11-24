@@ -98,8 +98,9 @@ void main() {
           identity: a, unit: body, fields: {'text': 'x'}, observedLive: {}),
     ]);
     final [sent] = await alice.unsent();
-    expect(await bob.absorb(sent.bytes), isA<Admitted>());
-    expect(await bob.absorb(sent.bytes), isA<Admitted>());
+    expect(await bob.absorb(sent.bytes), isA<Appended>());
+    expect(await bob.absorb(sent.bytes), isA<AlreadyHeld>(),
+        reason: 'a re-delivered frame must not read as a change');
     expect(await _snapshot(bob), await _snapshot(alice));
     expect(await bob.unsent(), isEmpty, reason: 'absorbed writes are not sent');
   });
@@ -107,7 +108,7 @@ void main() {
   test('a refused frame changes nothing', () async {
     final j = _journal(InMemoryJournalStore());
     final r = await j.absorb(Uint8List.fromList('{"v":1}'.codeUnits));
-    expect(r, isA<Refused>());
+    expect(r, isA<NotAdmitted>());
     expect(await j.readAll(), isEmpty);
   });
 

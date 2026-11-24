@@ -61,8 +61,9 @@ await journal.absorb(received);
 A view is worked out from its record's write bytes on every `read`: each write is
 hashed, decoded and checked again, and on a shared store the read also takes the
 cross-tab lock. That is fine for a gesture, not for a frame. An app that renders
-often keeps its own views, rebuilt when it writes and when `absorb` admits
-something new, and reads the journal only then.
+often keeps its own views, rebuilt when it writes and when `absorb` returns `Appended`
+(not `AlreadyHeld`, which a retrying peer sends often), and reads the journal
+only then.
 
 ## Testing on every compiler
 

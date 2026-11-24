@@ -65,16 +65,17 @@ final class RecordJournal {
   }
 
   /// Admits [frame] through the door and, when admitted and new, appends and
-  /// projects it. Receiving the same bytes again changes nothing.
-  Future<Admission> absorb(List<int> frame) {
-    final admission = door.admit(frame);
-    if (admission case Admitted(:final write)) {
-      return _store.transaction((txn) async {
-        await _append(txn, write, authoredHere: false);
-        return admission;
-      });
+  /// projects it. Receiving the same bytes again changes nothing, and the
+  /// result says so: only [Appended] means the journal grew.
+  Future<Absorption> absorb(List<int> frame) async {
+    switch (door.admit(frame)) {
+      case Refused refused:
+        return NotAdmitted(refused);
+      case Admitted(:final write):
+        final appended = await _store
+            .transaction((txn) => _append(txn, write, authoredHere: false));
+        return appended ? Appended(write) : AlreadyHeld(write);
     }
-    return Future.value(admission);
   }
 
   /// [record]'s view, or null when no write names it. The transaction only
@@ -123,12 +124,14 @@ final class RecordJournal {
         await txn.setAckedSeq(seq);
       });
 
-  Future<void> _append(JournalTransaction txn, UnitWrite w,
+  /// Appends and projects [w] unless it is already held; true when it was new.
+  Future<bool> _append(JournalTransaction txn, UnitWrite w,
       {required bool authoredHere}) async {
-    if (await txn.holds(w.id)) return;
+    if (await txn.holds(w.id)) return false;
     await txn.append(JournalEntry(await txn.lastSeq() + 1, w.bytes,
         authoredHere: authoredHere));
     await txn.project(w.record, w.id, w.bytes);
+    return true;
   }
 
   /// Bytes from the store were admitted once by this door; a refusal now means
@@ -138,4 +141,27 @@ final class RecordJournal {
         Refused(:final reason, :final id) =>
           throw StateError('stored write $id no longer admitted: $reason'),
       };
+}
+
+/// What [RecordJournal.absorb] did with a frame.
+sealed class Absorption {
+  const Absorption();
+}
+
+/// Admitted and new: the journal grew, so views over its record changed.
+final class Appended extends Absorption {
+  const Appended(this.write);
+  final UnitWrite write;
+}
+
+/// Admitted, and already held: nothing changed.
+final class AlreadyHeld extends Absorption {
+  const AlreadyHeld(this.write);
+  final UnitWrite write;
+}
+
+/// Refused by the door: nothing changed.
+final class NotAdmitted extends Absorption {
+  const NotAdmitted(this.refused);
+  final Refused refused;
 }

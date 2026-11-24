@@ -139,12 +139,23 @@ void main() {
       expect(v.contestedUnits, isEmpty, reason: 'no write can settle it');
     });
 
-    test('a value nested past maxNestingDepth cannot be drafted', () {
+    test('a field nests as deep as a write allows, and no deeper', () {
       Object? nest(int depth) => depth == 0 ? 1 : [nest(depth - 1)];
       expect(canonicalJsonOrNull(nest(maxNestingDepth)), isNotNull);
       expect(canonicalJsonOrNull(nest(maxNestingDepth + 1)), isNull);
-      expect(() => m.edit(a, body, {'n': nest(maxNestingDepth)}),
-          throwsArgumentError);
+      // The write object and its fields object take two levels of the frame.
+      final deepest = m.edit(a, body, {'n': nest(maxNestingDepth - 2)});
+      expect(noteDoor.admit(deepest.bytes), isA<Admitted>());
+      // The constructor alone, so a refusal at encode or at the door can't
+      // stand in for it.
+      expect(
+          () => UnitWriteDraft.content(
+              identity: a,
+              unit: body,
+              fields: {'n': nest(maxNestingDepth - 1)},
+              observedLive: {}),
+          throwsArgumentError,
+          reason: 'refused when drafted, not at write time');
     });
 
     test('a double cannot be drafted', () {
