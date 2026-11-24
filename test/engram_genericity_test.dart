@@ -20,7 +20,7 @@ void main() {
   test('every type takes a write and reads back', () async {
     final j = _device(1);
     final writes = {
-      Identity.of('concept', {'nonce': 'c1'}): (
+      Identity.of(FamilyName.of('concept'), {'nonce': 'c1'}): (
         'body',
         {
           'name': 'Spaced repetition',
@@ -30,7 +30,7 @@ void main() {
           'parentConceptId': null,
         }
       ),
-      Identity.of('relationship', {'nonce': 'r1'}): (
+      Identity.of(FamilyName.of('relationship'), {'nonce': 'r1'}): (
         'body',
         {
           'from': 'c1',
@@ -40,7 +40,7 @@ void main() {
           'type': 'prerequisite',
         }
       ),
-      Identity.of('quizItem', {'nonce': 'q1'}): (
+      Identity.of(FamilyName.of('quizItem'), {'nonce': 'q1'}): (
         'content',
         {
           'conceptId': 'c1',
@@ -49,7 +49,7 @@ void main() {
           'rubric': null,
         }
       ),
-      Identity.of('review', {'nonce': 'rv1'}): (
+      Identity.of(FamilyName.of('review'), {'nonce': 'rv1'}): (
         'event',
         {
           'quizItemId': 'q1',
@@ -59,7 +59,7 @@ void main() {
           'desiredRetention': 9000,
         }
       ),
-      Identity.of('document', {'outlineId': 'outline-doc-7'}): (
+      Identity.of(FamilyName.of('document'), {'outlineId': 'outline-doc-7'}): (
         'ingest',
         {
           'title': 'Memory',
@@ -68,7 +68,10 @@ void main() {
           'ingestedText': '…',
         }
       ),
-      Identity.of('topic', {'nonce': 't1'}): ('name', {'name': 'Learning'}),
+      Identity.of(FamilyName.of('topic'), {'nonce': 't1'}): (
+        'name',
+        {'name': 'Learning'}
+      ),
     };
     await j.write([
       for (final MapEntry(key: id, value: (unit, fields)) in writes.entries)
@@ -76,37 +79,52 @@ void main() {
             identity: id, unit: _u(unit), fields: fields, observedLive: {}),
     ]);
     final views = await j.readAll();
-    expect({for (final v in views) v.schema.type},
+    expect({for (final v in views) v.schema.type.value},
         {'concept', 'relationship', 'quizItem', 'review', 'document', 'topic'});
     expect(views.every((v) => v is DrawnRecord), isTrue);
   });
 
   test('a document is keyed by its Outline id', () {
-    expect(_id(Identity.of('document', {'outlineId': 'outline-doc-7'})),
-        RecordId.of(family: 'document', key: 'outline-doc-7'));
+    expect(
+        _id(Identity.of(
+            FamilyName.of('document'), {'outlineId': 'outline-doc-7'})),
+        RecordId(FamilyName.of('document'), RecordKey.of('outline-doc-7')));
   });
 
   test('ids from different families never collide, whatever the keys', () {
     // The document family's key is the raw Outline id, so it can spell the
     // topicDocument family's key for (t1, d1) exactly.
-    final doc = Identity.of('document', {'outlineId': '2:t1:d1'});
-    final link =
-        Identity.of('topicDocument', {'topicId': 't1', 'documentId': 'd1'});
+    final doc =
+        Identity.of(FamilyName.of('document'), {'outlineId': '2:t1:d1'});
+    final link = Identity.of(
+        FamilyName.of('topicDocument'), {'topicId': 't1', 'documentId': 'd1'});
     expect(_id(doc).key, _id(link).key);
     expect(_id(doc), isNot(_id(link)));
   });
 
   test('a record id round-trips through its storage key', () {
-    final id = RecordId.of(family: 'a:b', key: '["x"]');
+    final id = RecordId(FamilyName.of('a:b'), RecordKey.of('["x"]'));
     expect(RecordId.parseStorageKey(id.storageKey), id);
     expect('$id', id.storageKey);
   });
 
-  test('only ids a store can key on exist', () {
+  test('only names a store can key on exist', () {
     final lone = String.fromCharCode(0xD800);
-    expect(RecordId.parse(family: 'f', key: lone), isNull);
-    expect(() => RecordId.of(family: 'f', key: lone), throwsArgumentError);
-    expect(RecordId.parse(family: '', key: 'k'), isNull);
+    expect(RecordKey.parse(lone), isNull);
+    expect(FamilyName.parse(lone), isNull);
+    expect(RecordType.parse(lone), isNull);
+    expect(RecordKey.parse(''), isNull);
+    expect(FamilyName.parse(''), isNull);
+    expect(() => RecordKey.of(lone), throwsArgumentError);
+  });
+
+  test('a hashed family cannot claim the identity field "family"', () {
+    expect(
+        () => HashedIdentityFamily(
+            name: FamilyName.of('f'),
+            schema: topicDocument,
+            fields: {FieldName.of('family')}),
+        throwsArgumentError);
   });
 
   test('a malformed storage key reads as null, never a throw', () {
@@ -124,35 +142,21 @@ void main() {
   });
 
   test('ids that print alike are the same id', () {
-    final a = RecordId.of(family: 'document/foo', key: 'bar');
-    final b = RecordId.of(family: 'document', key: 'foo/bar');
+    final a = RecordId(FamilyName.of('document/foo'), RecordKey.of('bar'));
+    final b = RecordId(FamilyName.of('document'), RecordKey.of('foo/bar'));
     expect('$a', isNot('$b'));
   });
 
-  test('a family whose key no store could hold is refused, not thrown',
-      () async {
-    final door = Door([_LoneSurrogateFamily()]);
-    final frame = Identity.of('lone', {'n': 'x'});
-    final bytes = UnitWriteDraft.restore(identity: frame, observedLiveTomb: {})
-        .encode(Salt.random(Random(1)));
-    expect(
-        door.admit(bytes),
-        isA<Refused>()
-            .having((r) => r.reason, 'reason', Refusal.invalidIdentity));
-  });
-
-  test('a family with no name cannot join a door', () {
-    expect(() => Door([_UnnamedFamily()]), throwsArgumentError);
-  });
-
   test('a schema cannot declare _tomb', () {
-    expect(() => RecordSchema(type: 't', units: {UnitName.tomb: {}}),
+    expect(
+        () =>
+            RecordSchema(type: RecordType.of('t'), units: {UnitName.tomb: {}}),
         throwsArgumentError);
   });
 
   test('a topicDocument is a composite id, and the composite is injective', () {
-    Identity td(String t, String d) =>
-        Identity.of('topicDocument', {'topicId': t, 'documentId': d});
+    Identity td(String t, String d) => Identity.of(
+        FamilyName.of('topicDocument'), {'topicId': t, 'documentId': d});
     expect(_id(td('a__b', 'c')), isNot(_id(td('a', 'b__c'))));
     expect(_id(td('t1', 'd1')), _id(td('t1', 'd1')));
   });
@@ -160,8 +164,8 @@ void main() {
   test('a topicDocument lives in _tomb: born by restore, gone by delete',
       () async {
     final j = _device(1);
-    final link = Identity.of(
-        'topicDocument', {'topicId': 't1', 'documentId': 'outline-doc-7'});
+    final link = Identity.of(FamilyName.of('topicDocument'),
+        {'topicId': 't1', 'documentId': 'outline-doc-7'});
     await j.write([
       UnitWriteDraft.restore(identity: link, observedLiveTomb: {}),
     ]);
@@ -177,8 +181,8 @@ void main() {
   });
 
   test('two devices adding one document to one topic do not race', () async {
-    final link = Identity.of(
-        'topicDocument', {'topicId': 't1', 'documentId': 'outline-doc-7'});
+    final link = Identity.of(FamilyName.of('topicDocument'),
+        {'topicId': 't1', 'documentId': 'outline-doc-7'});
     final alice = _device(1);
     final bob = _device(2);
     for (final d in [alice, bob]) {
@@ -193,7 +197,7 @@ void main() {
 
   test('a review is write-once: a second write to it is refused', () async {
     final j = _device(1);
-    final rv = Identity.of('review', {'nonce': 'rv1'});
+    final rv = Identity.of(FamilyName.of('review'), {'nonce': 'rv1'});
     final fields = {
       'quizItemId': 'q1',
       'rating': 3,
@@ -245,7 +249,7 @@ void main() {
     await expectLater(
         _device(1).write([
           UnitWriteDraft.deterministicBirth(
-              identity: Identity.of('review', {'nonce': 'rv1'}),
+              identity: Identity.of(FamilyName.of('review'), {'nonce': 'rv1'}),
               unit: _u('event'),
               fields: {
                 'quizItemId': 'q1',
@@ -259,7 +263,7 @@ void main() {
 
   test('predicted written once per device shows both; the package never picks',
       () async {
-    final q = Identity.of('quizItem', {'nonce': 'q1'});
+    final q = Identity.of(FamilyName.of('quizItem'), {'nonce': 'q1'});
     final alice = _device(1);
     final bob = _device(2);
     await alice.write([
@@ -290,7 +294,7 @@ void main() {
     // Difficulty 10.0 and 9.99 at ×100: "1000" sorts before "999". The order
     // is deterministic, which is all a fold needs, but it is not "smallest".
     final m = Door(engramFamilies);
-    final q = Identity.of('quizItem', {'nonce': 'q1'});
+    final q = Identity.of(FamilyName.of('quizItem'), {'nonce': 'q1'});
     UnitWrite w(int d, int seed) => switch (m.admit(UnitWriteDraft.content(
             identity: q,
             unit: _u('predicted'),
@@ -307,29 +311,10 @@ void main() {
   test('a double is refused before it is drafted', () {
     expect(
         () => UnitWriteDraft.content(
-            identity: Identity.of('review', {'nonce': 'rv1'}),
+            identity: Identity.of(FamilyName.of('review'), {'nonce': 'rv1'}),
             unit: _u('event'),
             fields: {'desiredRetention': 0.9},
             observedLive: {}),
         throwsArgumentError);
   });
-}
-
-final class _LoneSurrogateFamily implements IdentityFamily {
-  @override
-  String get name => 'lone';
-  @override
-  bool get allowsDeterministicBirth => false;
-  @override
-  FamilyRecord? resolve(Identity identity) =>
-      (key: String.fromCharCode(0xD800), schema: topicDocument);
-}
-
-final class _UnnamedFamily implements IdentityFamily {
-  @override
-  String get name => '';
-  @override
-  bool get allowsDeterministicBirth => false;
-  @override
-  FamilyRecord? resolve(Identity identity) => null;
 }

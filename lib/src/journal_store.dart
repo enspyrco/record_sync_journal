@@ -22,7 +22,10 @@ final class JournalEntry {
 /// database.
 abstract interface class JournalStore {
   /// Runs [body] in one transaction. If [body] throws, nothing it did lands,
-  /// and the error is rethrown. This is the journal's only exclusion: take
+  /// and the error is rethrown. A store may run [body] more than once for one
+  /// call (sembast on the web re-runs it when another tab committed first) and
+  /// keep only the last run, so every body the journal passes acts only
+  /// through `txn`: salts are drawn and bytes encoded before the transaction. This is the journal's only exclusion: take
   /// here whatever lock spans the isolates or tabs sharing the store, outside
   /// the database's own transaction. [body] never opens a second transaction
   /// on the same store, so a lock that is not reentrant is fine.

@@ -12,7 +12,7 @@ Map<UnitName, Set<FieldName>> _units(Map<String, List<String>> units) => {
     };
 
 final concept = RecordSchema(
-    type: 'concept',
+    type: RecordType.of('concept'),
     units: _units({
       'body': [
         'name',
@@ -26,13 +26,13 @@ final concept = RecordSchema(
     }));
 
 final relationship = RecordSchema(
-    type: 'relationship',
+    type: RecordType.of('relationship'),
     units: _units({
       'body': ['from', 'to', 'label', 'description', 'type'],
     }));
 
 final quizItem = RecordSchema(
-  type: 'quizItem',
+  type: RecordType.of('quizItem'),
   units: _units({
     'content': ['conceptId', 'question', 'answer', 'rubric'],
     'predicted': ['predictedDifficulty'],
@@ -41,7 +41,7 @@ final quizItem = RecordSchema(
 );
 
 final review = RecordSchema(
-  type: 'review',
+  type: RecordType.of('review'),
   units: _units({
     'event': ['quizItemId', 'rating', 'reviewedAt', 'desiredRetention'],
   }),
@@ -49,14 +49,14 @@ final review = RecordSchema(
 );
 
 final document = RecordSchema(
-    type: 'document',
+    type: RecordType.of('document'),
     units: _units({
       'ingest': ['title', 'updatedAt', 'ingestedAt', 'ingestedText'],
       'collection': ['collectionId', 'collectionName'],
     }));
 
 final topic = RecordSchema(
-    type: 'topic',
+    type: RecordType.of('topic'),
     units: _units({
       'created': ['createdAt'],
       'name': ['name'],
@@ -65,15 +65,19 @@ final topic = RecordSchema(
     }));
 
 /// Membership only: the record is its `_tomb`.
-final topicDocument = RecordSchema(type: 'topicDocument', units: {});
+final topicDocument =
+    RecordSchema(type: RecordType.of('topicDocument'), units: {});
 
 HashedIdentityFamily _nonce(String name, RecordSchema schema) =>
-    HashedIdentityFamily(name: name, schema: schema, fields: {'nonce'});
+    HashedIdentityFamily(
+        name: FamilyName.of(name),
+        schema: schema,
+        fields: {FieldName.of('nonce')});
 
 /// A document's id is its Outline id, carried in the identity.
 final class OutlineDocumentFamily implements IdentityFamily {
   @override
-  String get name => 'document';
+  FamilyName get name => FamilyName.of('document');
 
   @override
   bool get allowsDeterministicBirth => false;
@@ -82,7 +86,8 @@ final class OutlineDocumentFamily implements IdentityFamily {
   FamilyRecord? resolve(Identity identity) {
     final json = identity.fields.json;
     if (json.keys.length != 1 || json.raw('outlineId') is! String) return null;
-    return (key: json.string('outlineId'), schema: document);
+    final key = RecordKey.parse(json.string('outlineId'));
+    return key == null ? null : (key: key, schema: document);
   }
 }
 
@@ -90,7 +95,7 @@ final class OutlineDocumentFamily implements IdentityFamily {
 /// length-prefixed so no two pairs derive one key (`a__b`+`c` vs `a`+`b__c`).
 final class TopicDocumentFamily implements IdentityFamily {
   @override
-  String get name => 'topicDocument';
+  FamilyName get name => FamilyName.of('topicDocument');
 
   @override
   bool get allowsDeterministicBirth => false;
@@ -106,8 +111,9 @@ final class TopicDocumentFamily implements IdentityFamily {
       return null;
     }
     final (t, d) = (json.string('topicId'), json.string('documentId'));
-    if (t.isEmpty || d.isEmpty) return null;
-    return (key: '${t.length}:$t:$d', schema: topicDocument);
+    final key =
+        t.isEmpty || d.isEmpty ? null : RecordKey.parse('${t.length}:$t:$d');
+    return key == null ? null : (key: key, schema: topicDocument);
   }
 }
 
@@ -120,9 +126,9 @@ final engramFamilies = <IdentityFamily>[
   // derived from its cause, so two devices making the same change mint one
   // write.
   HashedIdentityFamily(
-    name: 'syntheticReview',
+    name: FamilyName.of('syntheticReview'),
     schema: review,
-    fields: {'quizItemId', 'contentSha256'},
+    fields: {FieldName.of('quizItemId'), FieldName.of('contentSha256')},
     allowsDeterministicBirth: true,
   ),
   OutlineDocumentFamily(),
@@ -132,7 +138,7 @@ final engramFamilies = <IdentityFamily>[
 
 /// The synthetic Again's identity for a card whose content became [content].
 Identity syntheticAgain(String quizItemId, Map<String, Object?> content) =>
-    Identity.of('syntheticReview', {
+    Identity.of(FamilyName.of('syntheticReview'), {
       'quizItemId': quizItemId,
       'contentSha256': WriteId.ofBytes(utf8.encode(canonicalJson(content))).hex,
     });

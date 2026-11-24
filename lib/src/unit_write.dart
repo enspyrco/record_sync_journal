@@ -182,7 +182,7 @@ final class UnitWriteDraft {
   }
 
   static CanonicalObject _tombFields(bool deleted) =>
-      CanonicalObject.of({UnitName.deletedField: deleted});
+      CanonicalObject.of({FieldName.deleted.value: deleted});
 
   final Identity identity;
   final UnitName unit;
@@ -281,12 +281,9 @@ final class Door {
   /// name.
   Door(Iterable<IdentityFamily> families) : _families = _byName(families);
 
-  static Map<String, IdentityFamily> _byName(Iterable<IdentityFamily> fs) {
-    final byName = <String, IdentityFamily>{};
+  static Map<FamilyName, IdentityFamily> _byName(Iterable<IdentityFamily> fs) {
+    final byName = <FamilyName, IdentityFamily>{};
     for (final f in fs) {
-      if (f.name.isEmpty) {
-        throw ArgumentError.value(f.name, 'families', 'a family has a name');
-      }
       if (byName.containsKey(f.name)) {
         throw ArgumentError.value(f.name, 'families', 'named twice');
       }
@@ -295,7 +292,7 @@ final class Door {
     return Map.unmodifiable(byName);
   }
 
-  final Map<String, IdentityFamily> _families;
+  final Map<FamilyName, IdentityFamily> _families;
 
   static const _keys = {
     'v',
@@ -313,8 +310,7 @@ final class Door {
     final family = _families[identity.family];
     final read = family?.resolve(identity);
     if (family == null || read == null) return null;
-    final id = RecordId.parse(family: family.name, key: read.key);
-    return id == null ? null : (id: id, schema: read.schema);
+    return (id: RecordId(family.name, read.key), schema: read.schema);
   }
 
   /// Admits [frame] or says why not. In order: hash before any decode; the
@@ -394,7 +390,7 @@ final class Door {
     final hasSaw = wire.has('saw');
     if (unitWire == UnitName.tomb.value) {
       if (fieldsWire.keys.length != 1) return refuse(Refusal.fields);
-      final deleted = fieldsWire.raw(UnitName.deletedField);
+      final deleted = fieldsWire.raw(FieldName.deleted.value);
       if (deleted is! bool) return refuse(Refusal.fields);
       if (salt == null) return refuse(Refusal.salt);
       if (deleted) {

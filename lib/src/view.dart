@@ -67,9 +67,10 @@ sealed class RecordView {
         u: UnitState.of(ws),
     };
     final tomb = units[UnitName.tomb];
-    final deleted =
-        tomb?.shown.map((f) => f.json.boolean(UnitName.deletedField)).toSet() ??
-            const <bool>{};
+    final deleted = tomb?.shown
+            .map((f) => f.json.boolean(FieldName.deleted.value))
+            .toSet() ??
+        const <bool>{};
 
     final args = (
       first.record,

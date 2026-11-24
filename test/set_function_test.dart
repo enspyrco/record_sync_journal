@@ -90,7 +90,7 @@ void main() {
     });
 
     test('a deterministic birth is one write from any device', () {
-      final id = Identity.of('derivedNote', {'cause': 'c'});
+      final id = Identity.of(FamilyName.of('derivedNote'), {'cause': 'c'});
       UnitWrite birth(int seed) =>
           Minter(seed).admit(UnitWriteDraft.deterministicBirth(
               identity: id, unit: body, fields: {'text': 'again'}));
@@ -114,15 +114,17 @@ void main() {
 
     test('a write-once unit with two births is shown, not listed as a race',
         () {
-      final schema = RecordSchema(type: 'once', units: {
+      final schema = RecordSchema(type: RecordType.of('once'), units: {
         body: fieldNames(['text']),
       }, writeOnce: {
         body
       });
-      final family =
-          HashedIdentityFamily(name: 'once', schema: schema, fields: {'nonce'});
+      final family = HashedIdentityFamily(
+          name: FamilyName.of('once'),
+          schema: schema,
+          fields: {FieldName.of('nonce')});
       final door = Door([family]);
-      final id = Identity.of('once', {'nonce': 'o'});
+      final id = Identity.of(FamilyName.of('once'), {'nonce': 'o'});
       final births = [
         for (final t in ['x', 'y'])
           m.admit(
