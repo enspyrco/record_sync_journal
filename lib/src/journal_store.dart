@@ -22,9 +22,10 @@ final class JournalEntry {
 /// database.
 abstract interface class JournalStore {
   /// Runs [body] in one transaction. If [body] throws, nothing it did lands,
-  /// and the error is rethrown. The journal reads through here without its
-  /// own lock, so isolation is this method's job alone. [body] never opens a
-  /// second transaction on the same store.
+  /// and the error is rethrown. This is the journal's only exclusion: take
+  /// here whatever lock spans the isolates or tabs sharing the store, outside
+  /// the database's own transaction. [body] never opens a second transaction
+  /// on the same store, so a lock that is not reentrant is fine.
   Future<T> transaction<T>(Future<T> Function(JournalTransaction txn) body);
 }
 

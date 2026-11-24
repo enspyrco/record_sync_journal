@@ -8,12 +8,10 @@ import 'package:test/test.dart';
 import 'fixtures/mint.dart';
 import 'fixtures/notes.dart';
 
-RecordJournal _journal(JournalStore store, {int seed = 1, Serializer? lock}) =>
-    RecordJournal(
-        store: store,
-        families: [noteFamily, derivedNoteFamily],
-        random: Random(seed),
-        serialize: lock);
+RecordJournal _journal(JournalStore store, {int seed = 1}) => RecordJournal(
+    store: store,
+    families: [noteFamily, derivedNoteFamily],
+    random: Random(seed));
 
 Future<String> _snapshot(RecordJournal j) async =>
     (await j.readAll()).map(describe).join('\n\n');
@@ -212,23 +210,23 @@ void main() {
         contains(w));
   });
 
-  test('every mutation goes through the given serializer', () async {
-    var calls = 0;
-    final queue = isolateLocalQueue();
-    Future<T> counting<T>(Future<T> Function() op) {
-      calls++;
-      return queue(op);
-    }
-
-    final j = _journal(InMemoryJournalStore(), lock: counting);
+  test('a store holding a lock that is not reentrant never deadlocks',
+      () async {
+    // The shape a cross-tab store takes: one non-reentrant lock, taken inside
+    // transaction(). Every journal operation must get through it.
+    final store = _LockedStore();
+    final j = _journal(store);
     await j.write([
       UnitWriteDraft.content(
           identity: a, unit: body, fields: {'text': 'x'}, observedLive: {}),
     ]);
     await j.absorb((await j.unsent()).single.bytes);
+    await j.read(aId);
+    await j.readAll();
     await j.recompute();
     await j.markAcked(1);
-    expect(calls, 4);
+    expect(store.held, isFalse);
+    expect(store.taken, greaterThanOrEqualTo(7));
   });
 
   test('the queue survives a failed operation', () async {
@@ -297,4 +295,26 @@ final class _Failing implements JournalTransaction {
   Future<List<RecordId>> projectedRecords() => _txn.projectedRecords();
   @override
   Future<void> clearProjection() => _txn.clearProjection();
+}
+
+/// An in-memory store that takes a lock which is not reentrant, as a web
+/// store's navigator.locks is, around every transaction.
+final class _LockedStore implements JournalStore {
+  final _inner = InMemoryJournalStore();
+  final _lock = isolateLocalQueue();
+  bool held = false;
+  int taken = 0;
+
+  @override
+  Future<T> transaction<T>(Future<T> Function(JournalTransaction txn) body) =>
+      _lock(() async {
+        if (held) throw StateError('lock taken twice');
+        held = true;
+        taken++;
+        try {
+          return await _inner.transaction(body);
+        } finally {
+          held = false;
+        }
+      });
 }
