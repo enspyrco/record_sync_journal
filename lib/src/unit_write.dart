@@ -365,6 +365,9 @@ final class Door {
     }
     final Object? parsed;
     try {
+      // Plain jsonDecode, not checked_json's refusing decoder: the canonical
+      // test below already refuses a duplicate key or an unsafe integer, and
+      // the C11 vectors pin both as notCanonical on every build.
       parsed = jsonDecode(text);
     } on FormatException {
       return refuse(Refusal.notJson);
