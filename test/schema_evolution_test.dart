@@ -116,8 +116,8 @@ void main() {
   });
 
   test(
-      'a stored write refused for another reason throws on read, and only '
-      'marks its own record in readAll', () async {
+      'a stored write refused for another reason makes only its own record '
+      'unreadable', () async {
     final store = InMemoryJournalStore();
     final breaking = RecordJournal(
         store: store, families: [_freezeBreakingNoteFamily], random: Random(3));
@@ -132,7 +132,7 @@ void main() {
           identity: other, unit: body, fields: {'text': 'y'}, observedLive: {}),
     ]);
 
-    await expectLater(older.read(aId), throwsStateError);
+    expect(await older.read(aId), isA<UnreadableRecord>());
     final all = await older.readAll();
     expect(all.map((r) => r.id),
         unorderedEquals([aId, noteDoor.resolve(other)!.id]));
@@ -158,7 +158,7 @@ void main() {
     await store.transaction((txn) =>
         txn.project(aId, WriteId.ofBytes(misfiled.bytes), misfiled.bytes));
 
-    await expectLater(older.read(aId), throwsStateError);
+    expect(await older.read(aId), isA<UnreadableRecord>());
     expect(await older.readAll(), [
       for (final id in [aId, bId]..sort())
         id == aId
@@ -185,7 +185,7 @@ void main() {
         txn.project(aId, WriteId.ofBytes(misfiled.bytes), misfiled.bytes));
 
     final older = _older(store);
-    await expectLater(older.read(aId), throwsStateError);
+    expect(await older.read(aId), isA<UnreadableRecord>());
     expect(await older.readAll(), [
       isA<UnreadableRecord>().having(
           (r) => r.fault,
@@ -195,7 +195,8 @@ void main() {
     ]);
   });
 
-  test('a stored write with a unit name no build can declare throws', () async {
+  test('a stored write with a unit name no build can declare is unreadable',
+      () async {
     final store = InMemoryJournalStore();
     final bytes = Uint8List.fromList(utf8.encode(
         '{"fields":{},"identity":{"family":"note","nonce":"a"},"kills":[],'
@@ -203,7 +204,7 @@ void main() {
     await store
         .transaction((txn) => txn.project(aId, WriteId.ofBytes(bytes), bytes));
     final older = _older(store);
-    await expectLater(older.read(aId), throwsStateError);
+    expect(await older.read(aId), isA<UnreadableRecord>());
     expect(await older.readAll(), [
       isA<UnreadableRecord>()
           .having((r) => r.fault, 'fault', _refused(Refusal.schema))

@@ -83,18 +83,21 @@ the vectors. The README says so.
   `unknownVersion` only. Under the freeze, those are the only refusals a newer
   build's writes can cause.
 - On a stored write, a refusal where `isNewerSchema` is true means it is left
-  out. **Any other refusal still throws `StateError`**: it means the freeze was
-  broken or the store is corrupt, and that should be loud.
-- `read` returns a sealed result: `Readable(RecordView)`, or
-  `UnreadRecord(id, unread)` when every stored write was left out, or null only
-  when nothing is stored. An editor can never mistake "written by a newer
-  version" for "absent", and won't create a record on top of one.
+  out. **Any other refusal makes the record an `UnreadableRecord`**: it means
+  the freeze was broken or the store is corrupt. It is loud in the type, not by
+  throwing: the house lints forbid catching an `Error`, so a throw would crash
+  a shipped build with no way back (Nick, 2026-11-27, from Noether's PR 8
+  finding).
+- `read` returns a sealed `RecordRead`: `Readable(RecordView)`, or
+  `UnreadRecord(id, unread)` when every stored write was left out, or
+  `UnreadableRecord(id, fault)`, or null only when nothing is stored. An editor
+  can never mistake "written by a newer version" for "absent", and won't
+  create a record on top of one.
 - `RecordView.unread` and `UnreadRecord.unread` hold `UnreadWrite` values: a
   distinct type that `UnitWriteDraft` doesn't accept, so a left-out id can
   never be copied into `kills` or `saw`.
-- `readAll` returns both kinds, plus `UnreadableRecord(id, refusal)` for a
-  record whose stored write throws, so one corrupt record doesn't take down the
-  whole journal. `read` of that record still throws.
+- `readAll` returns the same results for every record, so one corrupt record
+  doesn't take down the whole journal.
 - `recompute` stays strict. Any refusal throws inside the transaction and
   nothing lands, so an old tab can never rebuild a newer tab's writes away.
   Nothing calls it automatically.

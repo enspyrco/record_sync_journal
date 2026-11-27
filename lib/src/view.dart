@@ -202,14 +202,8 @@ sealed class RecordRead {
   RecordId get id;
 }
 
-/// A record whose stored writes this build either read or, being newer, left
-/// out: what `RecordJournal.read` returns.
-sealed class IntactRecordRead extends RecordRead {
-  const IntactRecordRead();
-}
-
 /// At least one stored write was read. [RecordView.unread] holds the rest.
-final class Readable extends IntactRecordRead {
+final class Readable extends RecordRead {
   const Readable(this.view);
   final RecordView view;
 
@@ -219,7 +213,7 @@ final class Readable extends IntactRecordRead {
 
 /// The record is stored, and every write of it was written by a newer build.
 /// It is not absent: an editor must not create it again.
-final class UnreadRecord extends IntactRecordRead {
+final class UnreadRecord extends RecordRead {
   UnreadRecord(this.id, Iterable<UnreadWrite> unread)
       : unread = Set.unmodifiable(unread);
 
