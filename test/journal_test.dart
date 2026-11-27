@@ -122,6 +122,10 @@ void main() {
           .having((e) => e.provenance, 'provenance', Provenance.relayed),
     ]);
     expect(await _snapshot(importer), await _snapshot(alice));
+
+    final peer = _journal(InMemoryJournalStore(), seed: 3);
+    expect(await peer.absorb(archived.bytes), isA<Appended>());
+    expect(await peer.unsent(), isEmpty);
   });
 
   test('relaying a write already absorbed keeps it unsent from here', () async {

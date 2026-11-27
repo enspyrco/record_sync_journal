@@ -77,9 +77,9 @@ the vectors. The README says so.
   runs before the family is looked up, and every rule that needs the family
   but not the unit runs before the unit is, so `unknownFamily` and
   `unknownUnit` only ever name a write some build could have made. Every future wire keeps `v` as an integer top-level
-  key: that's the part of the wire that can never change. (Today the key-set
-  test runs first, at `lib/src/unit_write.dart:350`, before `v` at line 358, so
-  a future wire with a new key would refuse as `schema`.)
+  key: that's the part of the wire that can never change. The door reads `v`
+  before the key-set test, so a future wire with a new key refuses as
+  `unknownVersion`.
 - `Refusal.isNewerSchema` is true for `unknownFamily`, `unknownUnit` and
   `unknownVersion` only. Under the freeze, those are the only refusals a newer
   build's writes can cause.
