@@ -61,7 +61,8 @@ for (final e in await journal.unsent()) send(e.bytes);
 await journal.absorb(received);
 
 // Importing an archive whose publisher may be gone: relay() takes the write
-// like absorb() and lists it in unsent(), so it reaches the other devices.
+// like absorb() and lists it in unsent(), so it reaches the other devices,
+// even a write this device already absorbed.
 // A frame a newer build wrote is refused and nothing is stored, so keep those
 // and relay them again after an update. Any other refusal is a dead frame no
 // build will admit: report it rather than keep it.
@@ -78,6 +79,9 @@ keeps each entry's provenance by `name` and reads it back with
 `Provenance.fromStoredName`, which reads a name a newer build wrote as
 `relayed` rather than throwing. A store that kept the old `authoredHere` flag
 maps `true` to `authored` and `false` to `received`.
+
+A store keys its log by `seq`, never by write id: relaying a write already
+held appends it again, so one write can sit at two seqs.
 
 ## Two app versions over one store
 
