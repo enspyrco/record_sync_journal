@@ -90,8 +90,8 @@ final class RecordJournal {
     if (bytes.isEmpty) return null;
     return switch (_readRecord(record, bytes)) {
       IntactRecordRead read => read,
-      UnreadableRecord(:final reason) =>
-        throw StateError('a stored write of $record is refused: $reason'),
+      UnreadableRecord(:final fault) =>
+        throw StateError('a stored write of $record is $fault'),
     };
   }
 
@@ -103,7 +103,11 @@ final class RecordJournal {
       final ids = [...await txn.projectedRecords()]..sort();
       return [for (final id in ids) (id, await txn.projected(id))];
     });
-    return [for (final (id, bytes) in byRecord) _readRecord(id, bytes)];
+    // A record listed with nothing projected is not stored, as in [read].
+    return [
+      for (final (id, bytes) in byRecord)
+        if (bytes.isNotEmpty) _readRecord(id, bytes),
+    ];
   }
 
   /// Rebuilds the projection from the log alone. It must equal the projection
@@ -145,25 +149,32 @@ final class RecordJournal {
   }
 
   /// [record]'s stored [bytes], which are not empty, read through the door.
-  /// When several writes are refused for reasons no newer build causes, the
-  /// one with the smallest id names the reason, so every device reports alike.
+  /// When several writes are faulty, the one with the smallest id names the
+  /// fault, so every device reports alike.
   RecordRead _readRecord(RecordId record, List<Uint8List> bytes) {
     final writes = <UnitWrite>[];
     final unread = <UnreadWrite>[];
-    Refused? broken;
+    (WriteId, StoredWriteFault)? broken;
+    void fault(WriteId id, StoredWriteFault f) {
+      if (broken == null || id.compareTo(broken!.$1) < 0) broken = (id, f);
+    }
+
     for (final b in bytes) {
       switch (door.admit(b)) {
+        case Admitted(:final write) when write.record != record:
+          fault(write.id, MisfiledStoredWrite(write.record));
         case Admitted(:final write):
           writes.add(write);
-        case Refused refused when refused.reason.isNewerSchema:
-          unread.add(UnreadWrite.of(refused));
         case Refused refused:
-          if (broken == null || refused.id.compareTo(broken.id) < 0) {
-            broken = refused;
+          switch (UnreadWrite.parse(refused)) {
+            case final UnreadWrite u:
+              unread.add(u);
+            case null:
+              fault(refused.id, RefusedStoredWrite(refused.reason));
           }
       }
     }
-    if (broken != null) return UnreadableRecord(record, broken.reason);
+    if (broken case (_, final f)?) return UnreadableRecord(record, f);
     if (writes.isEmpty) return UnreadRecord(record, unread);
     return Readable(RecordView.of(writes, unread: unread));
   }

@@ -62,7 +62,7 @@ String describeRead(RecordRead r) => switch (r) {
       Readable(:final view) =>
         '${describe(view)}${view.unread.isEmpty ? '' : '\nunread=${view.unread.length}'}',
       UnreadRecord(:final id, :final unread) => '$id unread=${unread.length}',
-      UnreadableRecord(:final id, :final reason) => '$id unreadable $reason',
+      UnreadableRecord(:final id, :final fault) => '$id unreadable $fault',
     };
 
 /// [record]'s view, or null when nothing is stored; fails the test when the

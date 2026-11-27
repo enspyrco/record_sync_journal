@@ -62,9 +62,14 @@ final Map<String, (String, Refusal?)> _textVectors = {
     Refusal.unknownVersion
   ),
   '"v":2 with v=1 keys missing': ('{"v":2}', Refusal.unknownVersion),
+  // Versions only rise from 1, so no build ever wrote these.
   '"v":0': (
     '{"fields":{},$_id,"kills":[],$_salt,"unit":"body","v":0}',
-    Refusal.unknownVersion
+    Refusal.schema
+  ),
+  '"v":-1': (
+    '{"fields":{},$_id,"kills":[],$_salt,"unit":"body","v":-1}',
+    Refusal.schema
   ),
   'no v': (
     '{"fields":{},$_id,"kills":[],$_salt,"unit":"body"}',
@@ -202,9 +207,55 @@ final Map<String, (String, Refusal?)> _textVectors = {
     '{"fields":{},$_id,"kills":[],$_salt,"unit":"nope","v":1}',
     Refusal.unknownUnit
   ),
+  // No build can declare it, so it is malformed, never a newer unit.
   'reserved unit name': (
     '{"fields":{},$_id,"kills":[],$_salt,"unit":"_x","v":1}',
-    Refusal.unknownUnit
+    Refusal.schema
+  ),
+  'empty unit name': (
+    '{"fields":{},$_id,"kills":[],$_salt,"unit":"","v":1}',
+    Refusal.schema
+  ),
+  // A malformed write is refused as malformed whatever families the reader
+  // has: an unknown family never hides it behind a reason reads skip.
+  'unknown family, reserved unit name': (
+    '{"fields":{},"identity":{"family":"nope","nonce":"n1"},"kills":[],'
+        '$_salt,"unit":"_x","v":1}',
+    Refusal.schema
+  ),
+  'unknown family, reserved field name': (
+    '{"fields":{"_f":1},"identity":{"family":"nope","nonce":"n1"},'
+        '"kills":[],$_salt,"unit":"body","v":1}',
+    Refusal.fields
+  ),
+  'unknown family, saw on a content write': (
+    '{"fields":{},"identity":{"family":"nope","nonce":"n1"},"kills":[],'
+        '$_salt,"saw":[],"unit":"body","v":1}',
+    Refusal.saw
+  ),
+  'unknown family, tomb not boolean': (
+    '{"fields":{"_deleted":1},"identity":{"family":"nope","nonce":"n1"},'
+        '"kills":[],$_salt,"unit":"_tomb","v":1}',
+    Refusal.fields
+  ),
+  'unknown family, unsalted write that kills': (
+    '{"fields":{},"identity":{"family":"nope","nonce":"n1"},'
+        '"kills":["$_a"],"unit":"body","v":1}',
+    Refusal.salt
+  ),
+  'unknown unit, unsalted write that kills': (
+    '{"fields":{},"identity":{"cause":"c","family":"derivedNote"},'
+        '"kills":["$_a"],"unit":"nope","v":1}',
+    Refusal.salt
+  ),
+  'unknown unit, unsalted in a family without births': (
+    '{"fields":{},$_id,"kills":[],"unit":"nope","v":1}',
+    Refusal.salt
+  ),
+  'unknown family, unsalted tomb': (
+    '{"fields":{"_deleted":false},"identity":{"family":"nope","nonce":"n1"},'
+        '"kills":[],"unit":"_tomb","v":1}',
+    Refusal.salt
   ),
   'undeclared field': (_bodyWith('{"zzz":1}'), Refusal.fields),
   'tomb with a second field': (

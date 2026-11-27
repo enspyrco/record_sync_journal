@@ -48,6 +48,9 @@ export 'src/view.dart'
         RecordRead,
         RecordView,
         UnitState,
+        MisfiledStoredWrite,
+        RefusedStoredWrite,
+        StoredWriteFault,
         UnreadableRecord,
         UnreadRecord,
         UnreadWrite;

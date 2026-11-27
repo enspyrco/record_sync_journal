@@ -70,9 +70,12 @@ the vectors. The README says so.
 
 - `Refusal` gains `unknownVersion`. **The door reads `v` before the v=1
   grammar**: after the object, depth, UTF-8 and canonical tests, an integer
-  `v` other than 1 is `unknownVersion`, whatever other keys the frame has.
-  Only a missing or non-integer `v`, or a v=1 frame that breaks the v=1
-  grammar, is `schema`. Every future wire keeps `v` as an integer top-level
+  `v` above 1 is `unknownVersion`, whatever other keys the frame has.
+  A missing, non-integer or below-1 `v`, or a v=1 frame that breaks the v=1
+  grammar, is `schema`. Every rule of the v=1 grammar that needs no family
+  runs before the family is looked up, and every rule that needs the family
+  but not the unit runs before the unit is, so `unknownFamily` and
+  `unknownUnit` only ever name a write some build could have made. Every future wire keeps `v` as an integer top-level
   key: that's the part of the wire that can never change. (Today the key-set
   test runs first, at `lib/src/unit_write.dart:350`, before `v` at line 358, so
   a future wire with a new key would refuse as `schema`.)
@@ -113,6 +116,20 @@ contract an app's transport must keep, and the README states it:
   log to an empty page, list the publishers again, and find no publisher and no
   page not yet read. Only then is `replayPending` cleared. A crash leaves it
   set, and the next start resumes.
+- **More than one shelf**: the replay reads the union of every shelf, per
+  publisher, and isn't done until every shelf has answered with an empty page.
+  An entry acknowledged by one shelf is then found whenever that shelf is up;
+  an outage delays the replay, and never shortens it. (codraw B2 acknowledges
+  on at least one shelf, pending Nick's V8 ruling.)
+- **One ordered log instead of per-publisher logs** (engram's Firestore
+  `sync_log_v2`): one bookmark stands in for the per-publisher cursors. The
+  bookmark is where a restart reads from, and reading carries on past it.
+  It holds at the first frame `absorb` returns as `NotAdmitted` with
+  `isNewerSchema`, so the upgraded build reads again from there, and a
+  bookmark that moved past it would lose that frame for good. Any other
+  `NotAdmitted` is a dead frame that no build will ever admit: the bookmark
+  passes it, and the app may report it. Holding at a dead frame would hold
+  the bookmark forever, and every restart would read the whole tail again.
 - **Replay is single-flight through its own lock**, never the lock the store's
   transactions take. That lock isn't reentrant (codraw's `navigator.locks`),
   and replay opens a transaction for each frame it absorbs, so holding it would

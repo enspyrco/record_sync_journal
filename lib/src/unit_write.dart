@@ -226,11 +226,11 @@ enum Refusal {
   /// The parsed value does not re-encode to exactly the decoded text.
   notCanonical,
 
-  /// `v` missing or not an integer, or a v=1 write with a key missing or
-  /// extra, or a value of the wrong type.
+  /// `v` missing, not an integer or below 1, or a v=1 write with a key
+  /// missing or extra, or a value of the wrong type.
   schema,
 
-  /// `v` is an integer other than 1: a wire this build doesn't know.
+  /// `v` is an integer above 1: a wire this build doesn't know.
   unknownVersion,
 
   /// `kills` or `saw` holds an entry that is not a write id, or is not sorted
@@ -371,9 +371,10 @@ final class Door {
     final wire = JsonObject.parse(parsed);
     if (wire == null) return refuse(Refusal.schema);
     // `v` is read before any v=1 rule, so a later wire with other keys is
-    // refused as a newer version, not as malformed.
+    // refused as a newer version, not as malformed. Versions only rise, so
+    // one below 1 was never written by any build.
     final v = wire.raw('v');
-    if (v is! int) return refuse(Refusal.schema);
+    if (v is! int || v < 1) return refuse(Refusal.schema);
     if (v != 1) return refuse(Refusal.unknownVersion);
     final keys = wire.keys.toSet();
     if (!_keys.containsAll(keys) || !keys.containsAll(_required)) {
@@ -405,75 +406,71 @@ final class Door {
 
     final identity = Identity.parse(identityWire);
     if (identity == null) return refuse(Refusal.schema);
-    final family = _families[identity.family];
-    if (family == null) return refuse(Refusal.unknownFamily);
-    final resolved = resolve(identity);
-    if (resolved == null) return refuse(Refusal.invalidIdentity);
-    final schema = resolved.schema;
-
     final fields = CanonicalObject.parse(fieldsWire.asUncheckedMap());
     if (fields == null) return refuse(Refusal.schema);
 
-    final hasSaw = wire.has('saw');
-    if (unitWire == UnitName.tomb.value) {
-      if (fieldsWire.keys.length != 1) return refuse(Refusal.fields);
-      final deleted = fieldsWire.raw(FieldName.deleted.value);
-      if (deleted is! bool) return refuse(Refusal.fields);
-      if (salt == null) return refuse(Refusal.salt);
-      if (deleted) {
-        final sawWire = wire.raw('saw');
-        if (!hasSaw || sawWire is! List<Object?>) return refuse(Refusal.saw);
-        final saw = _sortedIds(sawWire);
-        if (saw == null) return refuse(Refusal.writeIds);
+    // Every rule that needs no schema is decided before the family is looked
+    // up, so `unknownFamily` and `unknownUnit`, which reads skip as newer,
+    // only ever name a well-formed write, whatever families this build has.
+    final _Parsed shape;
+    switch (_shapeOf(wire, unitWire, fieldsWire, salt, kills)) {
+      case _Malformed(:final reason):
+        return refuse(reason);
+      case final _Parsed parsed:
+        shape = parsed;
+    }
+    final f = _families[identity.family];
+    if (f == null) return refuse(Refusal.unknownFamily);
+    final r = resolve(identity);
+    if (r == null) return refuse(Refusal.invalidIdentity);
+    switch (shape) {
+      case _DeleteShape(:final saw):
         return Admitted(DeleteWrite._(
           bytes: bytes.asUnmodifiableView(),
           id: id,
           identity: identity,
-          record: resolved.id,
-          schema: schema,
+          record: r.id,
+          schema: r.schema,
           fields: fields,
           kills: kills,
           salt: salt,
           saw: saw,
         ));
-      }
-      if (hasSaw) return refuse(Refusal.saw);
-      return Admitted(RestoreWrite._(
-        bytes: bytes.asUnmodifiableView(),
-        id: id,
-        identity: identity,
-        record: resolved.id,
-        schema: schema,
-        fields: fields,
-        kills: kills,
-        salt: salt,
-      ));
+      case _RestoreShape():
+        return Admitted(RestoreWrite._(
+          bytes: bytes.asUnmodifiableView(),
+          id: id,
+          identity: identity,
+          record: r.id,
+          schema: r.schema,
+          fields: fields,
+          kills: kills,
+          salt: salt,
+        ));
+      case _ContentShape(:final unit, :final names):
+        // Needs the family but not the unit, so it comes before `unknownUnit`.
+        if (salt == null && !f.allowsDeterministicBirth) {
+          return refuse(Refusal.salt);
+        }
+        final schema = r.schema;
+        final declared = schema.units[unit];
+        if (declared == null) return refuse(Refusal.unknownUnit);
+        if (!declared.containsAll(names)) return refuse(Refusal.fields);
+        if (schema.writeOnce.contains(unit) && kills.isNotEmpty) {
+          return refuse(Refusal.writeOnce);
+        }
+        return Admitted(ContentWrite._(
+          bytes: bytes.asUnmodifiableView(),
+          id: id,
+          identity: identity,
+          record: r.id,
+          schema: schema,
+          unit: unit,
+          fields: fields,
+          kills: kills,
+          salt: salt,
+        ));
     }
-
-    if (hasSaw) return refuse(Refusal.saw);
-    final unit = UnitName.parse(unitWire);
-    final declared = unit == null ? null : schema.units[unit];
-    if (unit == null || declared == null) return refuse(Refusal.unknownUnit);
-    final names = {for (final k in fieldsWire.keys) FieldName.parse(k)};
-    if (!declared.containsAll(names)) return refuse(Refusal.fields);
-    if (salt == null &&
-        (kills.isNotEmpty || !family.allowsDeterministicBirth)) {
-      return refuse(Refusal.salt);
-    }
-    if (schema.writeOnce.contains(unit) && kills.isNotEmpty) {
-      return refuse(Refusal.writeOnce);
-    }
-    return Admitted(ContentWrite._(
-      bytes: bytes.asUnmodifiableView(),
-      id: id,
-      identity: identity,
-      record: resolved.id,
-      schema: schema,
-      unit: unit,
-      fields: fields,
-      kills: kills,
-      salt: salt,
-    ));
   }
 
   /// The ids in [wire], or null unless every entry is a write id and they are
@@ -490,4 +487,71 @@ final class Door {
     }
     return Set.unmodifiable(ids);
   }
+
+  /// What the write is, by every rule that needs no schema: a delete, a
+  /// restore, or content naming a well-formed unit and field names.
+  static _ShapeOrMalformed _shapeOf(JsonObject wire, String unitWire,
+      JsonObject fieldsWire, Salt? salt, Set<WriteId> kills) {
+    final hasSaw = wire.has('saw');
+    if (unitWire == UnitName.tomb.value) {
+      if (fieldsWire.keys.length != 1) return const _Malformed(Refusal.fields);
+      final deleted = fieldsWire.raw(FieldName.deleted.value);
+      if (deleted is! bool) return const _Malformed(Refusal.fields);
+      if (salt == null) return const _Malformed(Refusal.salt);
+      if (!deleted) {
+        return hasSaw ? const _Malformed(Refusal.saw) : const _RestoreShape();
+      }
+      final sawWire = wire.raw('saw');
+      if (!hasSaw || sawWire is! List<Object?>) {
+        return const _Malformed(Refusal.saw);
+      }
+      final saw = _sortedIds(sawWire);
+      return saw == null
+          ? const _Malformed(Refusal.writeIds)
+          : _DeleteShape(saw);
+    }
+    if (hasSaw) return const _Malformed(Refusal.saw);
+    // Only a birth may be unsalted, and a birth kills nothing.
+    if (salt == null && kills.isNotEmpty) return const _Malformed(Refusal.salt);
+    // A name no build can declare is malformed, never a newer unit.
+    final unit = UnitName.parse(unitWire);
+    if (unit == null) return const _Malformed(Refusal.schema);
+    final names = <FieldName>{};
+    for (final k in fieldsWire.keys) {
+      final name = FieldName.parse(k);
+      if (name == null) return const _Malformed(Refusal.fields);
+      names.add(name);
+    }
+    return _ContentShape(unit, names);
+  }
+}
+
+/// A write's form before its family is consulted, or why it has none.
+sealed class _ShapeOrMalformed {
+  const _ShapeOrMalformed();
+}
+
+final class _Malformed extends _ShapeOrMalformed {
+  const _Malformed(this.reason);
+  final Refusal reason;
+}
+
+/// A well-formed write: a delete, a restore, or content.
+sealed class _Parsed extends _ShapeOrMalformed {
+  const _Parsed();
+}
+
+final class _DeleteShape extends _Parsed {
+  const _DeleteShape(this.saw);
+  final Set<WriteId> saw;
+}
+
+final class _RestoreShape extends _Parsed {
+  const _RestoreShape();
+}
+
+final class _ContentShape extends _Parsed {
+  const _ContentShape(this.unit, this.names);
+  final UnitName unit;
+  final Set<FieldName> names;
 }

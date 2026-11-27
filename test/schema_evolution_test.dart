@@ -1,7 +1,9 @@
 // Two builds over one store, where the newer one added a unit to `note` and a
 // whole family: the older build leaves out what it can't read and says so
 // (schema-evolution DESIGN §2).
+import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:record_sync_journal/record_sync_journal.dart';
 import 'package:test/test.dart';
@@ -43,6 +45,9 @@ RecordJournal _older(JournalStore s) =>
 
 RecordJournal _newer(JournalStore s) => RecordJournal(
     store: s, families: [_newerNoteFamily, _stickerFamily], random: Random(2));
+
+Matcher _refused(Refusal reason) =>
+    isA<RefusedStoredWrite>().having((f) => f.reason, 'reason', reason);
 
 Identity _sticker(String nonce) =>
     Identity.of(FamilyName.of('sticker'), {'nonce': nonce});
@@ -135,8 +140,50 @@ void main() {
         all.whereType<UnreadableRecord>().single,
         isA<UnreadableRecord>()
             .having((r) => r.id, 'id', aId)
-            .having((r) => r.reason, 'reason', Refusal.fields));
+            .having((r) => r.fault, 'fault', _refused(Refusal.fields)));
     expect(all.whereType<Readable>(), hasLength(1));
+  });
+
+  test('a write stored under another record makes that record unreadable',
+      () async {
+    final store = InMemoryJournalStore();
+    final older = _older(store);
+    final b = note('b');
+    final bId = noteDoor.resolve(b)!.id;
+    await older.write([
+      UnitWriteDraft.content(
+          identity: b, unit: body, fields: {'text': 'b'}, observedLive: {}),
+    ]);
+    final [misfiled] = await older.unsent();
+    await store.transaction((txn) =>
+        txn.project(aId, WriteId.ofBytes(misfiled.bytes), misfiled.bytes));
+
+    await expectLater(older.read(aId), throwsStateError);
+    expect(await older.readAll(), [
+      for (final id in [aId, bId]..sort())
+        id == aId
+            ? isA<UnreadableRecord>().having(
+                (r) => r.fault,
+                'fault',
+                isA<MisfiledStoredWrite>()
+                    .having((f) => f.namedRecord, 'namedRecord', bId))
+            : isA<Readable>(),
+    ]);
+  });
+
+  test('a stored write with a unit name no build can declare throws', () async {
+    final store = InMemoryJournalStore();
+    final bytes = Uint8List.fromList(utf8.encode(
+        '{"fields":{},"identity":{"family":"note","nonce":"a"},"kills":[],'
+        '"salt":"00000000000000000000000000000000","unit":"_x","v":1}'));
+    await store
+        .transaction((txn) => txn.project(aId, WriteId.ofBytes(bytes), bytes));
+    final older = _older(store);
+    await expectLater(older.read(aId), throwsStateError);
+    expect(await older.readAll(), [
+      isA<UnreadableRecord>()
+          .having((r) => r.fault, 'fault', _refused(Refusal.schema))
+    ]);
   });
 
   test('recompute in an older build throws and changes nothing', () async {
@@ -165,12 +212,9 @@ void main() {
   test('only the three newer-schema refusals make an UnreadWrite', () {
     final id = WriteId.ofBytes([0x7B]);
     for (final reason in Refusal.values) {
-      UnreadWrite make() => UnreadWrite.of(Refused(id, reason));
-      if (reason.isNewerSchema) {
-        expect(make(), isA<UnreadWrite>());
-      } else {
-        expect(make, throwsArgumentError, reason: '$reason');
-      }
+      expect(UnreadWrite.parse(Refused(id, reason)),
+          reason.isNewerSchema ? isA<UnreadWrite>() : isNull,
+          reason: '$reason');
     }
     expect(Refusal.values.where((r) => r.isNewerSchema),
         {Refusal.unknownFamily, Refusal.unknownUnit, Refusal.unknownVersion});
