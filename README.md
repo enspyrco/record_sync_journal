@@ -62,11 +62,14 @@ await journal.absorb(received);
 
 // Importing an archive whose publisher may be gone: relay() takes the write
 // like absorb() and lists it in unsent(), so it reaches the other devices.
-// A build that can't read a frame refuses it and stores nothing, so keep the
-// archive until every frame is held, and import it again after an update.
+// A frame a newer build wrote is refused and nothing is stored, so keep those
+// and relay them again after an update. Any other refusal is a dead frame no
+// build will admit: report it rather than keep it.
 final keep = [
   for (final frame in archived)
-    if (await journal.relay(frame) is NotAdmitted) frame,
+    if (await journal.relay(frame)
+        case NotAdmitted(:final refused) when refused.reason.isNewerSchema)
+      frame,
 ];
 ```
 

@@ -135,7 +135,7 @@ void main() {
     await bob.absorb(sent.bytes);
     expect(await bob.relay(sent.bytes), isA<AlreadyHeld>());
     expect(await bob.unsent(), isEmpty,
-        reason: 'its publisher already sent it');
+        reason: 'a shelf acknowledged it before it was sent live');
   });
 
   test('only authored and relayed writes are sent from here', () {

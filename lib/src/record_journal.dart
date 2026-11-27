@@ -78,7 +78,10 @@ final class RecordJournal {
   /// As [absorb], for a write this device must pass on because its publisher
   /// may never send it again, as when importing an archive: it is listed in
   /// [unsent] like a write authored here. A write already held keeps the
-  /// provenance it arrived with: its publisher sent it then.
+  /// provenance it arrived with. That is safe only while every write absorbed
+  /// here was acknowledged by a shelf before it was sent live (precondition 1
+  /// of docs/design/schema-evolution/DESIGN.md), so other devices can fetch it
+  /// without this one.
   Future<Absorption> relay(List<int> frame) => _take(frame, Provenance.relayed);
 
   Future<Absorption> _take(List<int> frame, Provenance provenance) async {

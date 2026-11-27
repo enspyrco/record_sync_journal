@@ -6,7 +6,8 @@ import 'values.dart';
 /// How a write came to be in this journal, which decides whether this device
 /// sends it. A store keeps it by [name] and reads it back with
 /// [fromStoredName], never `values.byName`, which throws on a name a newer
-/// build wrote.
+/// build wrote. Because an older build sends a provenance it doesn't know, a
+/// newer build may add one only if sending its writes again is safe.
 enum Provenance {
   /// Written on this device.
   authored,
