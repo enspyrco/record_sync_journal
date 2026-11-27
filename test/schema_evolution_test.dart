@@ -171,6 +171,30 @@ void main() {
     ]);
   });
 
+  test('a newer write stored under another record is misfiled, not unread',
+      () async {
+    final newer = _newer(InMemoryJournalStore());
+    final b = note('b');
+    await newer.write([
+      UnitWriteDraft.content(
+          identity: b, unit: _color, fields: {'hex': '#00f'}, observedLive: {}),
+    ]);
+    final [misfiled] = await newer.unsent();
+    final store = InMemoryJournalStore();
+    await store.transaction((txn) =>
+        txn.project(aId, WriteId.ofBytes(misfiled.bytes), misfiled.bytes));
+
+    final older = _older(store);
+    await expectLater(older.read(aId), throwsStateError);
+    expect(await older.readAll(), [
+      isA<UnreadableRecord>().having(
+          (r) => r.fault,
+          'fault',
+          isA<MisfiledStoredWrite>().having(
+              (f) => f.namedRecord, 'namedRecord', noteDoor.resolve(b)!.id)),
+    ]);
+  });
+
   test('a stored write with a unit name no build can declare throws', () async {
     final store = InMemoryJournalStore();
     final bytes = Uint8List.fromList(utf8.encode(

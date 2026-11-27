@@ -288,11 +288,15 @@ final class Admitted extends Admission {
 }
 
 final class Refused extends Admission {
-  const Refused(this.id, this.reason);
+  const Refused(this.id, this.reason, {this.record});
 
   /// The refused bytes' id: it covers exactly what was refused.
   final WriteId id;
   final Refusal reason;
+
+  /// The record the write names, when the door got as far as resolving it
+  /// before refusing; null when it refused earlier.
+  final RecordId? record;
 
   @override
   String toString() => 'Refused($reason, $id)';
@@ -448,16 +452,18 @@ final class Door {
           salt: salt,
         ));
       case _ContentShape(:final unit, :final names):
+        // The record is resolved, so every refusal from here names it.
+        Refused refuseIn(Refusal reason) => Refused(id, reason, record: r.id);
         // Needs the family but not the unit, so it comes before `unknownUnit`.
         if (salt == null && !f.allowsDeterministicBirth) {
-          return refuse(Refusal.salt);
+          return refuseIn(Refusal.salt);
         }
         final schema = r.schema;
         final declared = schema.units[unit];
-        if (declared == null) return refuse(Refusal.unknownUnit);
-        if (!declared.containsAll(names)) return refuse(Refusal.fields);
+        if (declared == null) return refuseIn(Refusal.unknownUnit);
+        if (!declared.containsAll(names)) return refuseIn(Refusal.fields);
         if (schema.writeOnce.contains(unit) && kills.isNotEmpty) {
-          return refuse(Refusal.writeOnce);
+          return refuseIn(Refusal.writeOnce);
         }
         return Admitted(ContentWrite._(
           bytes: bytes.asUnmodifiableView(),

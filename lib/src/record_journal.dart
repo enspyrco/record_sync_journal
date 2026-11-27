@@ -165,6 +165,8 @@ final class RecordJournal {
           fault(write.id, MisfiledStoredWrite(write.record));
         case Admitted(:final write):
           writes.add(write);
+        case Refused(record: final named?, :final id) when named != record:
+          fault(id, MisfiledStoredWrite(named));
         case Refused refused:
           switch (UnreadWrite.parse(refused)) {
             case final UnreadWrite u:

@@ -7,6 +7,7 @@
 //   dart test -p chrome -c dart2wasm
 import 'dart:convert';
 
+import 'package:checked_json/checked_json.dart';
 import 'package:crypto/crypto.dart';
 import 'package:record_sync_journal/record_sync_journal.dart';
 import 'package:test/test.dart';
@@ -371,6 +372,79 @@ void main() {
       test(name, () => _check(name, bytes, refusal));
     }
   });
+
+  // Reads skip a write refused as newer, so that refusal must only ever name
+  // a write some build could have made. Every text vector is tried as is and
+  // with its family or unit renamed to one this door lacks; whenever the door
+  // calls the result newer, a build that declares what is missing, changing
+  // nothing a shipped family fixed, must admit the same bytes.
+  group('a write refused as newer is admitted by a build that declares it', () {
+    var cases = 0;
+    for (final MapEntry(key: name, value: (text, _)) in _textVectors.entries) {
+      for (final (label, variant) in [
+        ('as is', text),
+        ('family renamed', text.replaceAll(_noteFamily, _freshFamily)),
+        (
+          'unit renamed',
+          text
+              .replaceAll('"unit":"body"', _freshUnit)
+              .replaceAll('"unit":"title"', _freshUnit)
+        ),
+      ]) {
+        final bytes = utf8.encode(variant);
+        if (noteDoor.admit(bytes) case Refused(:final reason)
+            when reason.isNewerSchema && reason != Refusal.unknownVersion) {
+          cases++;
+          test('$name, $label ($reason)',
+              () => expect(_witness(bytes).admit(bytes), isA<Admitted>()));
+        }
+      }
+    }
+    test('the corpus yields enough cases to mean something',
+        () => expect(cases, greaterThan(40)));
+  });
+}
+
+const _noteFamily = '"family":"note"';
+const _freshFamily = '"family":"zfresh"';
+const _freshUnit = '"unit":"zfresh"';
+
+/// A door for a build that declares the family and unit [bytes] name, beside
+/// the shipped families, keeping everything a shipped family fixed: its
+/// identity fields, whether it allows births, and its existing units.
+Door _witness(List<int> bytes) {
+  final shipped = {
+    for (final f in [noteFamily, derivedNoteFamily]) f.name: f
+  };
+  final wire = JsonObject.parse(jsonDecode(utf8.decode(bytes)))!;
+  final identity = Identity.parse(JsonObject.parse(wire.raw('identity'))!)!;
+  final fieldKeys = JsonObject.parse(wire.raw('fields'))!.keys;
+  final unit = switch (wire.raw('unit')) {
+    final String u => u,
+    final other => fail('unit is not a string: $other'),
+  };
+  final known = shipped[identity.family];
+  final witness = HashedIdentityFamily(
+    name: identity.family,
+    schema: RecordSchema(
+      type: known?.schema.type ?? RecordType.of('witness'),
+      units: {
+        ...?known?.schema.units,
+        if (unit != UnitName.tomb.value)
+          UnitName.of(unit): {for (final k in fieldKeys) FieldName.of(k)},
+      },
+      writeOnce: known?.schema.writeOnce ?? const {},
+    ),
+    fields: known?.fields ??
+        {for (final k in identity.fields.json.keys) FieldName.of(k)},
+    allowsDeterministicBirth:
+        known?.allowsDeterministicBirth ?? !wire.has('salt'),
+  );
+  return Door([
+    witness,
+    for (final f in shipped.values)
+      if (f.name != witness.name) f,
+  ]);
 }
 
 void _check(String name, List<int> bytes, Refusal? refusal) {
