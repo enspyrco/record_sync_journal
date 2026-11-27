@@ -2,7 +2,8 @@
 
 Status: **UN-TEMPERED (provisional).** Three strikes, each 4/4 RECAST, and the
 budget is spent (`TEMPER.md`). The core has held since round 1. This version
-folds in round 3's findings and has not been struck. Nothing here is built.
+folds in round 3's findings and has not been struck. It is built in `lib/src`
+(PRs 8 to 11); `proto/` is the copy the strikes read.
 Earlier rounds: `DESIGN-round1.md` (holding, carrying), `DESIGN-round2.md`,
 `DESIGN-round3.md` (the version round 3 struck).
 Code: `proto/` (copies of `lib/src`). Shelf facts: `proto/b2_shelf_excerpt.md`.
@@ -182,4 +183,5 @@ fingerprint trigger, the held-bytes cap. `JournalStore` gains nothing.
 1. With the preconditions met, is there a path on which a device that can read a
    write never comes to hold it?
 2. Is there a path on which `kills` or `saw` names a write its author didn't see?
-3. Does skip-or-throw split stored refusals correctly under the freeze?
+3. Does left-out-or-unreadable split stored refusals correctly under the
+   freeze?

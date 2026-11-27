@@ -5,7 +5,8 @@ import 'values.dart';
 
 /// How a write came to be in this journal, which decides whether this device
 /// sends it. A store keeps it by [name] and reads it back with
-/// `Provenance.values.byName`.
+/// [fromStoredName], never `values.byName`, which throws on a name a newer
+/// build wrote.
 enum Provenance {
   /// Written on this device.
   authored,
@@ -16,6 +17,17 @@ enum Provenance {
 
   /// Received from a peer that publishes it itself.
   received;
+
+  /// The provenance a store kept as [name]. A name this build doesn't know
+  /// was written by a newer build and reads as [relayed]: sending a write
+  /// again is harmless, since every receiver already holding it ignores it,
+  /// while not sending it could lose it.
+  static Provenance fromStoredName(String name) {
+    for (final p in values) {
+      if (p.name == name) return p;
+    }
+    return relayed;
+  }
 
   /// Whether this device sends the write: [unsent] lists it until acked.
   bool get isSentFromHere => switch (this) {

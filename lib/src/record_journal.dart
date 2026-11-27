@@ -12,7 +12,8 @@ import 'view.dart';
 /// - The projection is each record's set of admitted write bytes, and a
 ///   record's value is a function of that set ([RecordView.of]), so there is
 ///   no merged state to keep right. [recompute] rebuilds it from the log.
-/// - Every write, authored here or absorbed, enters through one [Door].
+/// - Every write, authored here, absorbed or relayed, enters through one
+///   [Door].
 /// - The store's transaction is the only exclusion. The door is a pure
 ///   function of bytes, so admitting runs outside any transaction.
 /// - No clock is read anywhere.
@@ -68,7 +69,9 @@ final class RecordJournal {
   /// Admits [frame], received from a peer that publishes it itself, and when
   /// admitted and new, appends and projects it. Receiving the same bytes
   /// again changes nothing, and the result says so: only [Appended] means the
-  /// journal grew. An absorbed write is never sent from here.
+  /// journal grew. An absorbed write is never sent from here, so a frame
+  /// whose publisher can't be relied on to send it on, such as one from an
+  /// archive, goes to [relay] instead.
   Future<Absorption> absorb(List<int> frame) =>
       _take(frame, Provenance.received);
 
@@ -198,7 +201,7 @@ final class RecordJournal {
       };
 }
 
-/// What [RecordJournal.absorb] did with a frame.
+/// What [RecordJournal.absorb] or [RecordJournal.relay] did with a frame.
 sealed class Absorption {
   const Absorption();
 }

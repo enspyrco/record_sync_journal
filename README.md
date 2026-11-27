@@ -62,11 +62,19 @@ await journal.absorb(received);
 
 // Importing an archive whose publisher may be gone: relay() takes the write
 // like absorb() and lists it in unsent(), so it reaches the other devices.
-await journal.relay(archived);
+// A build that can't read a frame refuses it and stores nothing, so keep the
+// archive until every frame is held, and import it again after an update.
+final keep = [
+  for (final frame in archived)
+    if (await journal.relay(frame) is NotAdmitted) frame,
+];
 ```
 
 `unsent()` lists writes whose `Provenance` is `authored` or `relayed`. A store
-keeps each entry's provenance by name.
+keeps each entry's provenance by `name` and reads it back with
+`Provenance.fromStoredName`, which reads a name a newer build wrote as
+`relayed` rather than throwing. A store that kept the old `authoredHere` flag
+maps `true` to `authored` and `false` to `received`.
 
 ## Two app versions over one store
 
@@ -107,8 +115,8 @@ and reads leave it out and say so:
 A view is worked out from its record's write bytes on every `read`: each write is
 hashed, decoded and checked again, and on a shared store the read also takes the
 cross-tab lock. That is fine for a gesture, not for a frame. An app that renders
-often keeps its own views, rebuilt when it writes and when `absorb` returns `Appended`
-(not `AlreadyHeld`, which a retrying peer sends often), and reads the journal
+often keeps its own views, rebuilt when it writes and when `absorb` or `relay` returns
+`Appended` (not `AlreadyHeld`, which a retrying peer sends often), and reads the journal
 only then.
 
 ## Testing on every compiler

@@ -148,6 +148,20 @@ void main() {
     });
   });
 
+  test('provenance is stored by a name that never changes', () {
+    expect(Provenance.values.map((p) => p.name),
+        ['authored', 'relayed', 'received'],
+        reason: 'stores hold these names; renaming one breaks every store');
+    for (final p in Provenance.values) {
+      expect(Provenance.fromStoredName(p.name), p);
+    }
+  });
+
+  test('a provenance name a newer build wrote reads as sent from here', () {
+    expect(Provenance.fromStoredName('exported'), Provenance.relayed);
+    expect(Provenance.fromStoredName(''), Provenance.relayed);
+  });
+
   test('a refused frame changes nothing', () async {
     final j = _journal(InMemoryJournalStore());
     final r = await j.absorb(Uint8List.fromList('{"v":1}'.codeUnits));
