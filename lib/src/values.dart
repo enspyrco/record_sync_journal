@@ -435,6 +435,10 @@ abstract interface class IdentityFamily {
 
   /// Whether a write in this family may be unsalted: a birth whose bytes any
   /// device would mint identically, so two devices make one write.
+  ///
+  /// Never changes once a build declaring the family has shipped: an older
+  /// build refuses a newer one's unsalted births as `salt`, which is not a
+  /// newer-schema refusal, so it would never read them.
   bool get allowsDeterministicBirth;
 
   /// The record [identity] names, or null when it is not a valid member of
