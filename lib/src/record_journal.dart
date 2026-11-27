@@ -12,7 +12,8 @@ import 'view.dart';
 /// - The projection is each record's set of admitted write bytes, and a
 ///   record's value is a function of that set ([RecordView.of]), so there is
 ///   no merged state to keep right. [recompute] rebuilds it from the log.
-/// - Every write, authored here or absorbed, enters through one [Door].
+/// - Every write, authored here, absorbed or relayed, enters through one
+///   [Door].
 /// - The store's transaction is the only exclusion. The door is a pure
 ///   function of bytes, so admitting runs outside any transaction.
 /// - No clock is read anywhere.
@@ -59,40 +60,52 @@ final class RecordJournal {
     }
     return _store.transaction((txn) async {
       for (final w in writes) {
-        await _append(txn, w, authoredHere: true);
+        await _append(txn, w, Provenance.authored);
       }
       return [for (final w in writes) w.id];
     });
   }
 
-  /// Admits [frame] through the door and, when admitted and new, appends and
-  /// projects it. Receiving the same bytes again changes nothing, and the
-  /// result says so: only [Appended] means the journal grew.
-  Future<Absorption> absorb(List<int> frame) async {
+  /// Admits [frame], received from a peer that publishes it itself, and when
+  /// admitted and new, appends and projects it. Receiving the same bytes
+  /// again changes nothing, and the result says so: only [Appended] means the
+  /// journal grew. An absorbed write is never sent from here, so a frame
+  /// whose publisher can't be relied on to send it on, such as one from an
+  /// archive, goes to [relay] instead.
+  Future<Absorption> absorb(List<int> frame) =>
+      _take(frame, Provenance.received);
+
+  /// As [absorb], for a write this device must pass on because its publisher
+  /// may never send it again, as when importing an archive: it is listed in
+  /// [unsent] like a write authored here. A write already held keeps the
+  /// provenance it arrived with. That is safe only while every write absorbed
+  /// here was acknowledged by a shelf before it was sent live (precondition 1
+  /// of docs/design/schema-evolution/DESIGN.md), so other devices can fetch it
+  /// without this one.
+  Future<Absorption> relay(List<int> frame) => _take(frame, Provenance.relayed);
+
+  Future<Absorption> _take(List<int> frame, Provenance provenance) async {
     switch (door.admit(frame)) {
       case Refused refused:
         return NotAdmitted(refused);
       case Admitted(:final write):
-        final appended = await _store
-            .transaction((txn) => _append(txn, write, authoredHere: false));
+        final appended =
+            await _store.transaction((txn) => _append(txn, write, provenance));
         return appended ? Appended(write) : AlreadyHeld(write);
     }
   }
 
   /// What is stored for [record], or null only when nothing is. Writes a
-  /// newer build made are left out and listed as unread; any other refusal
-  /// of a stored write throws a [StateError].
+  /// newer build made are left out and listed as unread; a stored write that
+  /// can't be read for any other reason makes it an [UnreadableRecord], which
+  /// the caller decides how to show. Nothing here throws on a stored write,
+  /// so a corrupt record can't crash a build that can no longer be patched.
   ///
   /// The transaction only copies bytes; the door reads them after it ends, so
   /// a read never holds writers back while it parses.
-  Future<IntactRecordRead?> read(RecordId record) async {
+  Future<RecordRead?> read(RecordId record) async {
     final bytes = await _store.transaction((txn) => txn.projected(record));
-    if (bytes.isEmpty) return null;
-    return switch (_readRecord(record, bytes)) {
-      IntactRecordRead read => read,
-      UnreadableRecord(:final fault) =>
-        throw StateError('a stored write of $record is $fault'),
-    };
+    return bytes.isEmpty ? null : _readRecord(record, bytes);
   }
 
   /// Every stored record, ordered by id. A record with a corrupt write is an
@@ -120,10 +133,11 @@ final class RecordJournal {
         }
       });
 
-  /// Writes authored here and not yet acknowledged, oldest first.
+  /// Writes this device sends (authored or relayed) and not yet
+  /// acknowledged, oldest first.
   Future<List<JournalEntry>> unsent() => _store.transaction((txn) async => [
         for (final e in await txn.entriesAfter(await txn.ackedSeq()))
-          if (e.authoredHere) e,
+          if (e.provenance.isSentFromHere) e,
       ]);
 
   /// Marks every entry up to and including [seq] acknowledged: a watermark,
@@ -139,11 +153,11 @@ final class RecordJournal {
       });
 
   /// Appends and projects [w] unless it is already held; true when it was new.
-  Future<bool> _append(JournalTransaction txn, UnitWrite w,
-      {required bool authoredHere}) async {
+  Future<bool> _append(
+      JournalTransaction txn, UnitWrite w, Provenance provenance) async {
     if (await txn.holds(w.id)) return false;
-    await txn.append(JournalEntry(await txn.lastSeq() + 1, w.bytes,
-        authoredHere: authoredHere));
+    await txn.append(
+        JournalEntry(await txn.lastSeq() + 1, w.bytes, provenance: provenance));
     await txn.project(w.record, w.id, w.bytes);
     return true;
   }
@@ -190,7 +204,7 @@ final class RecordJournal {
       };
 }
 
-/// What [RecordJournal.absorb] did with a frame.
+/// What [RecordJournal.absorb] or [RecordJournal.relay] did with a frame.
 sealed class Absorption {
   const Absorption();
 }

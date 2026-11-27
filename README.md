@@ -34,7 +34,7 @@ record type so codraw and engram share one implementation.
 | `Door.admit(bytes)` | Hash, strict UTF-8, JSON, canonical re-encode test, exact schema. Same verdict on the VM, dart2js and dart2wasm (C11). |
 | `UnitWriteDraft` | The four writes an author can ask for: `content`, `delete`, `restore`, `deterministicBirth`. |
 | `UnitState`, `RecordView` | The set function, and `DrawnRecord` / `HiddenRecord` / `GhostRecord`. Pure functions of a set of writes. |
-| `RecordJournal` | `write`, `absorb`, `read`, `readAll`, `recompute`, `unsent`, `markAcked`. |
+| `RecordJournal` | `write`, `absorb`, `relay`, `read`, `readAll`, `recompute`, `unsent`, `markAcked`. |
 | `JournalStore` | The storage seam, and the only lock. `InMemoryJournalStore` ships here; apps write their own over sembast, drift, … When tabs or isolates share a store, its `transaction` takes the lock that spans them, outside the database transaction: `transaction(fn) => withLock(() => db.transaction(fn))`. |
 | `isolateLocalQueue` | A one-at-a-time queue, for a store whose transactions don't already exclude each other. |
 | `HashedIdentityFamily` | The common family: key = UUIDv8 of SHA-256 over the identity's canonical text. |
@@ -48,8 +48,9 @@ final journal = RecordJournal(store: InMemoryJournalStore(), families: [noteFami
 final seen = switch (await journal.read(id)) {
   null => <WriteId>{},                        // nothing stored: a birth
   Readable(:final view) => view.units[body]?.liveIds ?? {},
-  UnreadRecord() => throw StateError('written by a newer version'),
+  UnreadRecord() || UnreadableRecord() => null, // this build can't edit it
 };
+if (seen == null) return;
 await journal.write([
   UnitWriteDraft.content(
       identity: note, unit: body, fields: {'text': 'hi'}, observedLive: seen),
@@ -58,7 +59,25 @@ await journal.write([
 // Transport is the caller's: send unsent() bytes, absorb() what arrives.
 for (final e in await journal.unsent()) send(e.bytes);
 await journal.absorb(received);
+
+// Importing an archive whose publisher may be gone: relay() takes the write
+// like absorb() and lists it in unsent(), so it reaches the other devices.
+// A frame a newer build wrote is refused and nothing is stored, so keep those
+// and relay them again after an update. Any other refusal is a dead frame no
+// build will admit: report it rather than keep it.
+final keep = [
+  for (final frame in archived)
+    if (await journal.relay(frame)
+        case NotAdmitted(:final refused) when refused.reason.isNewerSchema)
+      frame,
+];
 ```
+
+`unsent()` lists writes whose `Provenance` is `authored` or `relayed`. A store
+keeps each entry's provenance by `name` and reads it back with
+`Provenance.fromStoredName`, which reads a name a newer build wrote as
+`relayed` rather than throwing. A store that kept the old `authoredHere` flag
+maps `true` to `authored` and `false` to `received`.
 
 ## Two app versions over one store
 
@@ -83,9 +102,10 @@ and reads leave it out and say so:
   don't create the record again; or null when nothing is stored.
 - An `UnreadWrite` keeps its id to itself, so no `kills` or `saw` can name a
   write this build never read.
-- Any other refusal of a stored write means the rule was broken or the store is
-  corrupt: `read` throws a `StateError`, and `readAll` returns that record as
-  `UnreadableRecord` so it can't hide the rest.
+- Any other refusal of a stored write, or a write stored under the wrong record,
+  means the rule was broken or the store is corrupt: `read` and `readAll`
+  return that record as `UnreadableRecord`, with its `fault`. Nothing throws,
+  so a corrupt record can't crash a shipped build, and it can't hide the rest.
 - `recompute` stays strict and throws on any refusal, so an older tab can never
   rebuild a newer tab's writes away.
 - An older build's `absorb` refuses a newer frame and stores nothing. After an
@@ -98,8 +118,8 @@ and reads leave it out and say so:
 A view is worked out from its record's write bytes on every `read`: each write is
 hashed, decoded and checked again, and on a shared store the read also takes the
 cross-tab lock. That is fine for a gesture, not for a frame. An app that renders
-often keeps its own views, rebuilt when it writes and when `absorb` returns `Appended`
-(not `AlreadyHeld`, which a retrying peer sends often), and reads the journal
+often keeps its own views, rebuilt when it writes and when `absorb` or `relay` returns
+`Appended` (not `AlreadyHeld`, which a retrying peer sends often), and reads the journal
 only then.
 
 ## Testing on every compiler

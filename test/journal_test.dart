@@ -105,6 +105,67 @@ void main() {
     expect(await bob.unsent(), isEmpty, reason: 'absorbed writes are not sent');
   });
 
+  test('a relayed write is sent from here, an absorbed one is not', () async {
+    final alice = _journal(InMemoryJournalStore(), seed: 1);
+    await alice.write([
+      UnitWriteDraft.content(
+          identity: a, unit: body, fields: {'text': 'x'}, observedLive: {}),
+    ]);
+    final [archived] = await alice.unsent();
+
+    final importer = _journal(InMemoryJournalStore(), seed: 2);
+    expect(await importer.relay(archived.bytes), isA<Appended>());
+    expect(await importer.relay(archived.bytes), isA<AlreadyHeld>());
+    expect(await importer.unsent(), [
+      isA<JournalEntry>()
+          .having((e) => e.bytes, 'bytes', archived.bytes)
+          .having((e) => e.provenance, 'provenance', Provenance.relayed),
+    ]);
+    expect(await _snapshot(importer), await _snapshot(alice));
+
+    final peer = _journal(InMemoryJournalStore(), seed: 3);
+    expect(await peer.absorb(archived.bytes), isA<Appended>());
+    expect(await peer.unsent(), isEmpty);
+  });
+
+  test('relaying a write already absorbed keeps it unsent from here', () async {
+    final alice = _journal(InMemoryJournalStore(), seed: 1);
+    await alice.write([
+      UnitWriteDraft.content(
+          identity: a, unit: body, fields: {'text': 'x'}, observedLive: {}),
+    ]);
+    final [sent] = await alice.unsent();
+    final bob = _journal(InMemoryJournalStore(), seed: 2);
+    await bob.absorb(sent.bytes);
+    expect(await bob.relay(sent.bytes), isA<AlreadyHeld>());
+    expect(await bob.unsent(), isEmpty,
+        reason: 'a shelf acknowledged it before it was sent live');
+  });
+
+  test('only authored and relayed writes are sent from here', () {
+    expect({
+      for (final p in Provenance.values) p: p.isSentFromHere
+    }, {
+      Provenance.authored: true,
+      Provenance.relayed: true,
+      Provenance.received: false,
+    });
+  });
+
+  test('provenance is stored by a name that never changes', () {
+    expect(Provenance.values.map((p) => p.name),
+        ['authored', 'relayed', 'received'],
+        reason: 'stores hold these names; renaming one breaks every store');
+    for (final p in Provenance.values) {
+      expect(Provenance.fromStoredName(p.name), p);
+    }
+  });
+
+  test('a provenance name a newer build wrote reads as sent from here', () {
+    expect(Provenance.fromStoredName('exported'), Provenance.relayed);
+    expect(Provenance.fromStoredName(''), Provenance.relayed);
+  });
+
   test('a refused frame changes nothing', () async {
     final j = _journal(InMemoryJournalStore());
     final r = await j.absorb(Uint8List.fromList('{"v":1}'.codeUnits));

@@ -3,15 +3,48 @@ import 'dart:typed_data';
 import 'serializer.dart';
 import 'values.dart';
 
-/// One appended write: its place in the log, its bytes, and whether this
-/// device authored it (and so must send it) or absorbed it from elsewhere.
+/// How a write came to be in this journal, which decides whether this device
+/// sends it. A store keeps it by [name] and reads it back with
+/// [fromStoredName], never `values.byName`, which throws on a name a newer
+/// build wrote. Because an older build sends a provenance it doesn't know, a
+/// newer build may add one only if sending its writes again is safe.
+enum Provenance {
+  /// Written on this device.
+  authored,
+
+  /// Received from elsewhere and passed on, as when importing an archive
+  /// whose publisher may be gone.
+  relayed,
+
+  /// Received from a peer that publishes it itself.
+  received;
+
+  /// The provenance a store kept as [name]. A name this build doesn't know
+  /// was written by a newer build and reads as [relayed]: sending a write
+  /// again is harmless, since every receiver already holding it ignores it,
+  /// while not sending it could lose it.
+  static Provenance fromStoredName(String name) {
+    for (final p in values) {
+      if (p.name == name) return p;
+    }
+    return relayed;
+  }
+
+  /// Whether this device sends the write: [unsent] lists it until acked.
+  bool get isSentFromHere => switch (this) {
+        authored || relayed => true,
+        received => false,
+      };
+}
+
+/// One appended write: its place in the log, its bytes, and how it got here.
 final class JournalEntry {
-  JournalEntry(this.seq, List<int> bytes, {required this.authoredHere})
+  JournalEntry(this.seq, List<int> bytes, {required this.provenance})
       : bytes = Uint8List.fromList(bytes).asUnmodifiableView();
 
   final int seq;
   final Uint8List bytes;
-  final bool authoredHere;
+  final Provenance provenance;
 }
 
 /// Where a journal keeps its log and projection. Everything happens inside a

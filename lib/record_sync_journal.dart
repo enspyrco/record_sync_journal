@@ -5,7 +5,12 @@ library;
 export 'src/canonical_json.dart'
     show canonicalJson, canonicalJsonOrNull, maxNestingDepth, maxSafeInteger;
 export 'src/journal_store.dart'
-    show InMemoryJournalStore, JournalEntry, JournalStore, JournalTransaction;
+    show
+        InMemoryJournalStore,
+        JournalEntry,
+        JournalStore,
+        JournalTransaction,
+        Provenance;
 export 'src/record_journal.dart'
     show Absorption, AlreadyHeld, Appended, NotAdmitted, RecordJournal;
 export 'src/serializer.dart' show Serializer, isolateLocalQueue;
@@ -43,14 +48,13 @@ export 'src/view.dart'
         DrawnRecord,
         GhostRecord,
         HiddenRecord,
-        IntactRecordRead,
+        MisfiledStoredWrite,
         Readable,
         RecordRead,
         RecordView,
-        UnitState,
-        MisfiledStoredWrite,
         RefusedStoredWrite,
         StoredWriteFault,
+        UnitState,
         UnreadableRecord,
         UnreadRecord,
         UnreadWrite;

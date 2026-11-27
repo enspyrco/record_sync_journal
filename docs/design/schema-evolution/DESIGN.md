@@ -2,7 +2,8 @@
 
 Status: **UN-TEMPERED (provisional).** Three strikes, each 4/4 RECAST, and the
 budget is spent (`TEMPER.md`). The core has held since round 1. This version
-folds in round 3's findings and has not been struck. Nothing here is built.
+folds in round 3's findings and has not been struck. It is built in `lib/src`
+(PRs 8 to 11); `proto/` is the copy the strikes read.
 Earlier rounds: `DESIGN-round1.md` (holding, carrying), `DESIGN-round2.md`,
 `DESIGN-round3.md` (the version round 3 struck).
 Code: `proto/` (copies of `lib/src`). Shelf facts: `proto/b2_shelf_excerpt.md`.
@@ -76,25 +77,28 @@ the vectors. The README says so.
   runs before the family is looked up, and every rule that needs the family
   but not the unit runs before the unit is, so `unknownFamily` and
   `unknownUnit` only ever name a write some build could have made. Every future wire keeps `v` as an integer top-level
-  key: that's the part of the wire that can never change. (Today the key-set
-  test runs first, at `lib/src/unit_write.dart:350`, before `v` at line 358, so
-  a future wire with a new key would refuse as `schema`.)
+  key: that's the part of the wire that can never change. The door reads `v`
+  before the key-set test, so a future wire with a new key refuses as
+  `unknownVersion`.
 - `Refusal.isNewerSchema` is true for `unknownFamily`, `unknownUnit` and
   `unknownVersion` only. Under the freeze, those are the only refusals a newer
   build's writes can cause.
 - On a stored write, a refusal where `isNewerSchema` is true means it is left
-  out. **Any other refusal still throws `StateError`**: it means the freeze was
-  broken or the store is corrupt, and that should be loud.
-- `read` returns a sealed result: `Readable(RecordView)`, or
-  `UnreadRecord(id, unread)` when every stored write was left out, or null only
-  when nothing is stored. An editor can never mistake "written by a newer
-  version" for "absent", and won't create a record on top of one.
+  out. **Any other refusal makes the record an `UnreadableRecord`**: it means
+  the freeze was broken or the store is corrupt. It is loud in the type, not by
+  throwing: the house lints forbid catching an `Error`, so a throw would crash
+  a shipped build with no way back (Nick, 2026-11-27, from Noether's PR 8
+  finding).
+- `read` returns a sealed `RecordRead`: `Readable(RecordView)`, or
+  `UnreadRecord(id, unread)` when every stored write was left out, or
+  `UnreadableRecord(id, fault)`, or null only when nothing is stored. An editor
+  can never mistake "written by a newer version" for "absent", and won't
+  create a record on top of one.
 - `RecordView.unread` and `UnreadRecord.unread` hold `UnreadWrite` values: a
   distinct type that `UnitWriteDraft` doesn't accept, so a left-out id can
   never be copied into `kills` or `saw`.
-- `readAll` returns both kinds, plus `UnreadableRecord(id, refusal)` for a
-  record whose stored write throws, so one corrupt record doesn't take down the
-  whole journal. `read` of that record still throws.
+- `readAll` returns the same results for every record, so one corrupt record
+  doesn't take down the whole journal.
 - `recompute` stays strict. Any refusal throws inside the transaction and
   nothing lands, so an old tab can never rebuild a newer tab's writes away.
   Nothing calls it automatically.
@@ -179,4 +183,5 @@ fingerprint trigger, the held-bytes cap. `JournalStore` gains nothing.
 1. With the preconditions met, is there a path on which a device that can read a
    write never comes to hold it?
 2. Is there a path on which `kills` or `saw` names a write its author didn't see?
-3. Does skip-or-throw split stored refusals correctly under the freeze?
+3. Does left-out-or-unreadable split stored refusals correctly under the
+   freeze?
