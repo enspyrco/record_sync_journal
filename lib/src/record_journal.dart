@@ -77,11 +77,9 @@ final class RecordJournal {
 
   /// As [absorb], for a write this device must pass on because its publisher
   /// may never send it again, as when importing an archive: it is listed in
-  /// [unsent] like a write authored here. A write already held keeps the
-  /// provenance it arrived with. That is safe only while every write absorbed
-  /// here was acknowledged by a shelf before it was sent live (precondition 1
-  /// of docs/design/schema-evolution/DESIGN.md), so other devices can fetch it
-  /// without this one.
+  /// [unsent] like a write authored here. A write already held, however it
+  /// arrived, is listed in [unsent] again unless it is already waiting there,
+  /// so a relay never depends on another device still holding the write.
   Future<Absorption> relay(List<int> frame) => _take(frame, Provenance.relayed);
 
   Future<Absorption> _take(List<int> frame, Provenance provenance) async {
@@ -153,9 +151,21 @@ final class RecordJournal {
       });
 
   /// Appends and projects [w] unless it is already held; true when it was new.
+  /// A held write taken to be sent from here and not already waiting in
+  /// [unsent] gets a second log entry, so the log can hold one write at two
+  /// seqs; its projection is unchanged.
   Future<bool> _append(
       JournalTransaction txn, UnitWrite w, Provenance provenance) async {
-    if (await txn.holds(w.id)) return false;
+    if (await txn.holds(w.id)) {
+      if (provenance.isSentFromHere &&
+          !(await txn.entriesAfter(await txn.ackedSeq())).any((e) =>
+              e.provenance.isSentFromHere &&
+              WriteId.ofBytes(e.bytes) == w.id)) {
+        await txn.append(JournalEntry(await txn.lastSeq() + 1, w.bytes,
+            provenance: provenance));
+      }
+      return false;
+    }
     await txn.append(
         JournalEntry(await txn.lastSeq() + 1, w.bytes, provenance: provenance));
     await txn.project(w.record, w.id, w.bytes);
@@ -215,7 +225,8 @@ final class Appended extends Absorption {
   final UnitWrite write;
 }
 
-/// Admitted, and already held: nothing changed.
+/// Admitted, and already held: no view changed. After [RecordJournal.relay]
+/// the write may have been listed in `unsent()` again.
 final class AlreadyHeld extends Absorption {
   const AlreadyHeld(this.write);
   final UnitWrite write;

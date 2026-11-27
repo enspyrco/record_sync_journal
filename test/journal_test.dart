@@ -128,7 +128,7 @@ void main() {
     expect(await peer.unsent(), isEmpty);
   });
 
-  test('relaying a write already absorbed keeps it unsent from here', () async {
+  test('relaying a write already absorbed sends it from here once', () async {
     final alice = _journal(InMemoryJournalStore(), seed: 1);
     await alice.write([
       UnitWriteDraft.content(
@@ -137,9 +137,38 @@ void main() {
     final [sent] = await alice.unsent();
     final bob = _journal(InMemoryJournalStore(), seed: 2);
     await bob.absorb(sent.bytes);
+    await bob.markAcked(1);
+    final before = await _snapshot(bob);
+
     expect(await bob.relay(sent.bytes), isA<AlreadyHeld>());
-    expect(await bob.unsent(), isEmpty,
-        reason: 'a shelf acknowledged it before it was sent live');
+    expect(await bob.relay(sent.bytes), isA<AlreadyHeld>());
+    expect(
+        await bob.unsent(),
+        [
+          isA<JournalEntry>()
+              .having((e) => e.seq, 'seq', 2)
+              .having((e) => e.bytes, 'bytes', sent.bytes)
+              .having((e) => e.provenance, 'provenance', Provenance.relayed),
+        ],
+        reason: 'queued once, though relayed twice');
+    expect(await _snapshot(bob), before, reason: 'the view is unchanged');
+
+    await bob.recompute();
+    expect(await _snapshot(bob), before,
+        reason: 'one write at two seqs projects once');
+  });
+
+  test('absorbing a write already held changes nothing', () async {
+    final alice = _journal(InMemoryJournalStore(), seed: 1);
+    await alice.write([
+      UnitWriteDraft.content(
+          identity: a, unit: body, fields: {'text': 'x'}, observedLive: {}),
+    ]);
+    final [sent] = await alice.unsent();
+    final bob = _journal(InMemoryJournalStore(), seed: 2);
+    await bob.relay(sent.bytes);
+    expect(await bob.absorb(sent.bytes), isA<AlreadyHeld>());
+    expect((await bob.unsent()).map((e) => e.provenance), [Provenance.relayed]);
   });
 
   test('only authored and relayed writes are sent from here', () {
