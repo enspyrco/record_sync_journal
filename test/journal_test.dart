@@ -153,7 +153,7 @@ void main() {
         reason: 'queued once, though relayed twice');
     expect(await _snapshot(bob), before, reason: 'the view is unchanged');
 
-    await bob.recompute();
+    expect(await bob.recompute(), isNull);
     expect(await _snapshot(bob), before,
         reason: 'one write at two seqs projects once');
   });
@@ -264,7 +264,7 @@ void main() {
     ]);
     await j.absorb((await other.unsent()).single.bytes);
     final before = await _snapshot(j);
-    await j.recompute();
+    expect(await j.recompute(), isNull);
     expect(await _snapshot(j), before);
     expect(before, contains('shown={"text":"x"} {"text":"y"}'));
   });
@@ -320,7 +320,7 @@ void main() {
       expect(await j.absorb(frame), isA<Appended>());
       expect(await j.absorb(frame), isA<AlreadyHeld>());
       await j.markAcked(1);
-      await j.recompute();
+      expect(await j.recompute(), isNull);
       final seqs = [for (final e in await j.unsent()) e.seq];
       return '${await _snapshot(j)}\nunsent=$seqs';
     }
@@ -343,7 +343,7 @@ void main() {
     await j.absorb((await j.unsent()).single.bytes);
     await j.read(aId);
     await j.readAll();
-    await j.recompute();
+    expect(await j.recompute(), isNull);
     await j.markAcked(1);
     expect(store.held, isFalse);
     expect(store.taken, greaterThanOrEqualTo(7));

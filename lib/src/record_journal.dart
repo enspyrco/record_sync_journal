@@ -1,6 +1,8 @@
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:meta/meta.dart';
+
 import 'journal_store.dart';
 import 'unit_write.dart';
 import 'values.dart';
@@ -122,13 +124,33 @@ final class RecordJournal {
   }
 
   /// Rebuilds the projection from the log alone. It must equal the projection
-  /// the live writes built.
-  Future<void> recompute() => _store.transaction((txn) async {
-        await txn.clearProjection();
+  /// the live writes built. Returns null when rebuilt.
+  ///
+  /// Strict: when the door refuses any logged write, newer-schema ones
+  /// included, it changes nothing and returns that refusal (the smallest id's,
+  /// when several are refused), so an older build can never rebuild a newer
+  /// build's writes away. Every write is admitted before anything is cleared,
+  /// so a refusal needs no rollback, and nothing here throws on a stored write.
+  @useResult
+  Future<Refused?> recompute() => _store.transaction((txn) async {
+        final writes = <UnitWrite>[];
+        Refused? refused;
         for (final e in await txn.entriesAfter(0)) {
-          final w = _readmit(e.bytes);
+          switch (door.admit(e.bytes)) {
+            case Admitted(:final write):
+              writes.add(write);
+            case final Refused r
+                when refused == null || r.id.compareTo(refused.id) < 0:
+              refused = r;
+            case Refused():
+          }
+        }
+        if (refused != null) return refused;
+        await txn.clearProjection();
+        for (final w in writes) {
           await txn.project(w.record, w.id, w.bytes);
         }
+        return null;
       });
 
   /// Writes this device sends (authored or relayed) and not yet
@@ -204,14 +226,6 @@ final class RecordJournal {
     if (writes.isEmpty) return UnreadRecord(record, unread);
     return Readable(RecordView.of(writes, unread: unread));
   }
-
-  /// For [recompute], which stays strict: every stored write must be read, so
-  /// an older build can never rebuild a newer build's writes away.
-  UnitWrite _readmit(List<int> bytes) => switch (door.admit(bytes)) {
-        Admitted(:final write) => write,
-        Refused(:final reason, :final id) =>
-          throw StateError('stored write $id no longer admitted: $reason'),
-      };
 }
 
 /// What [RecordJournal.absorb] or [RecordJournal.relay] did with a frame.
