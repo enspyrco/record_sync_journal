@@ -211,11 +211,35 @@ void main() {
     ]);
   });
 
-  test('recompute in an older build throws and changes nothing', () async {
-    final (older, newer, _, _) = await extended();
+  test('recompute in an older build returns the refusal and changes nothing',
+      () async {
+    final (older, newer, _, c) = await extended();
     final before = describe((await viewOf(newer, aId))!);
-    await expectLater(older.recompute(), throwsStateError);
+    expect(
+        await older.recompute(),
+        isA<Refused>()
+            .having((r) => r.id, 'id', c)
+            .having((r) => r.reason, 'reason', Refusal.unknownUnit));
     expect(describe((await viewOf(newer, aId))!), before);
+    expect(await newer.recompute(), isNull);
+    expect(describe((await viewOf(newer, aId))!), before);
+  });
+
+  test('recompute names the smallest refused id, whatever the log order',
+      () async {
+    final store = InMemoryJournalStore();
+    final newer = _newer(store);
+    final ids = <WriteId>[];
+    for (final hex in ['#f00', '#0f0', '#00f']) {
+      ids.addAll(await newer.write([
+        UnitWriteDraft.content(
+            identity: note(hex),
+            unit: _color,
+            fields: {'hex': hex},
+            observedLive: {}),
+      ]));
+    }
+    expect((await _older(store).recompute())!.id, (ids..sort()).first);
   });
 
   test('an older build refuses a newer frame as newer, and stores nothing',

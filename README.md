@@ -111,8 +111,10 @@ and reads leave it out and say so:
   means the rule was broken or the store is corrupt: `read` and `readAll`
   return that record as `UnreadableRecord`, with its `fault`. Nothing throws,
   so a corrupt record can't crash a shipped build, and it can't hide the rest.
-- `recompute` stays strict and throws on any refusal, so an older tab can never
-  rebuild a newer tab's writes away.
+- `recompute` stays strict: on any refusal, newer-schema ones included, it
+  changes nothing and returns the `Refused` (null means it rebuilt), so an
+  older tab can never rebuild a newer tab's writes away, and a repair button
+  can't crash on a corrupt store.
 - An older build's `absorb` refuses a newer frame and stores nothing. After an
   upgrade, the app's transport reads every write again from the start, so
   what it refused while it was older arrives now

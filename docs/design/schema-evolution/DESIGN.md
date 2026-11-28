@@ -99,9 +99,10 @@ the vectors. The README says so.
   never be copied into `kills` or `saw`.
 - `readAll` returns the same results for every record, so one corrupt record
   doesn't take down the whole journal.
-- `recompute` stays strict. Any refusal throws inside the transaction and
-  nothing lands, so an old tab can never rebuild a newer tab's writes away.
-  Nothing calls it automatically.
+- `recompute` stays strict. It admits every logged write before clearing
+  anything, and on any refusal it writes nothing and returns the `Refused`,
+  so an old tab can never rebuild a newer tab's writes away, and nothing
+  depends on the store rolling back a throw. Nothing calls it automatically.
 
 ## 3. After an upgrade, the shelf is read again, and the upgrade isn't done until that finishes
 
