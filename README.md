@@ -87,8 +87,9 @@ held appends it again, so one write can sit at two seqs.
 
 A newer build may add families, and units to an existing record type, but must
 never change a shipped unit: its field set, a field's encoding, its write-once
-bit, or a family's name, identity fields, key or `resolve`. Never rename or
-reuse a name; deprecate it instead.
+bit, a family's name, identity fields, key, `resolve` or
+`allowsDeterministicBirth`, or a record type's name. Never rename or reuse a
+name; deprecate it instead.
 
 The package keeps one more rule for its own wire: every future version stays a
 canonical JSON object within today's `maxNestingDepth`, with an integer `v`.
